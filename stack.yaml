@@ -38,12 +38,13 @@ resolver: lts-6.6
 packages:
 - '.'
 - location:
-    git: https://github.com/asayers/slack-api
-    commit: "3e4e4ea"
+    git: https://github.com/mpickering/slack-api
+    commit: "5cfeeb3"
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
-extra-deps: []
+extra-deps:
+- aeson-coerce-0.1.0.0
 
 # Override default flag values for local packages and extra-deps
 flags: {}

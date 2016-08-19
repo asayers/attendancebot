@@ -23,7 +23,16 @@ executable attendance-bot
       , containers >= 0.5
       , unordered-containers >= 0.2.7
       , lens >= 4.13
+      , data-default-class >= 0.0.1
+      , process >= 1.2.3
       , slack-api >= 0.9
+      , vector-space >= 0.10
       , text >= 1.2
       , time >= 1.5
-      , transformers >= 0.4
+      , thyme >= 0.3.5
+      , Chart >= 1.6
+      , Chart-cairo >= 1.6
+      , mtl >= 2.2
+      , cron >= 0.4.1
+      , old-locale
+      , hashable >= 1.2

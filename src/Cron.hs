@@ -11,7 +11,7 @@ module Cron
 
 import Control.Concurrent
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.Trans
 import Data.Function (on)
 import Data.List (sortBy)
 import Data.Maybe
