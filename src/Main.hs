@@ -21,7 +21,9 @@ import Data.Thyme
 import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
 import System.Cron.Schedule
+import System.Directory
 import System.Environment
+import System.FilePath
 import System.Locale
 import System.Process
 import Web.Slack hiding (lines)
@@ -42,6 +44,13 @@ main = do
         void $ execSchedule $ schedule h
         -- run main loop
         runAttendance h $ forever (getNextEvent >>= handleEvent)
+
+ensureExists :: FilePath -> IO ()
+ensureExists path = do
+    exists <- doesFileExist path
+    unless exists $ do
+        createDirectoryIfMissing True (takeDirectory path)
+        writeFile path ""
 
 handleEvent :: Event -> Attendance ()
 handleEvent = \case
