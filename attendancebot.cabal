@@ -1,8 +1,8 @@
-name:                attendance-bot
+name:                attendancebot
 version:             0.1.0.0
 synopsis:            Slackbot to track empolyee attendance
 description:         Please see README.md
-homepage:            https://github.com/asayers/attendance-bot
+homepage:            https://github.com/asayers/attendancebot
 license:             BSD3
 license-file:        LICENSE
 author:              Alex Sayers
@@ -13,26 +13,32 @@ build-type:          Simple
 -- extra-source-files:
 cabal-version:       >=1.10
 
-executable attendance-bot
+executable attendancebot
   default-language:    Haskell2010
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   hs-source-dirs:      src
   main-is:             Main.hs
+  other-modules:
+        Attendance.CheckIn
+      , Attendance.Monad
+      , Attendance.TimeSheet
   build-depends:
         base >= 4.7 && < 5
-      , containers >= 0.5
-      , unordered-containers >= 0.2.7
-      , lens >= 4.13
-      , data-default-class >= 0.0.1
-      , process >= 1.2.3
-      , slack-api >= 0.9
-      , vector-space >= 0.10
-      , text >= 1.2
-      , time >= 1.5
-      , thyme >= 0.3.5
       , Chart >= 1.6
       , Chart-cairo >= 1.6
-      , mtl >= 2.2
+      , containers >= 0.5
       , cron >= 0.4.1
-      , old-locale
+      , data-default-class >= 0.0.1
+      , directory >= 1.2
+      , filepath >= 1.4
       , hashable >= 1.2
+      , lens >= 4.13
+      , mtl >= 2.2
+      , old-locale
+      , process >= 1.2.3
+      , slack-api >= 0.9
+      , text >= 1.2
+      , thyme >= 0.3.5
+      , time >= 1.5
+      , unordered-containers >= 0.2.7
+      , vector-space >= 0.10
