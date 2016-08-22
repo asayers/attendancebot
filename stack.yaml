@@ -39,7 +39,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/mpickering/slack-api
-    commit: "5cfeeb3"
+    commit: "3eba0916fb9d02eb94950d8646c52a9d1ed56e56"
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)

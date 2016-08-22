@@ -153,7 +153,7 @@ weeklySummary = do
     --         ]
     let ts = UTCTime monday (fromSeconds' 0) ^. from utcTime . posixTime . from thyme
     chartUrl <- renderWeeklySummaryChart
-    let attachment = def
+    let attachment = defaultAttachment
           { attachmentTitle  = Just $ "Week beginning " <> monday'
           , attachmentFields = rows
           , attachmentFooter = Just "Weekly summary"
