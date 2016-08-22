@@ -34,6 +34,7 @@ import Web.Slack hiding (lines)
 
 main :: IO ()
 main = do
+    slackConfig <- getSlackConfig
     checkinLog <- getCheckinLog
     withAttnH slackConfig checkinLog $ \h -> do
         -- initialise state
@@ -71,8 +72,11 @@ schedule h = do
     addJob (runAttendance h dailySummary) "55 23 * * 0-4"  -- 8:55 mon-fri
     addJob (runAttendance h weeklySummary) "31 3 * * 5"    -- midday on friday
 
-slackConfig :: SlackConfig
-slackConfig = SlackConfig { _slackApiToken = "" }
+getSlackConfig :: IO SlackConfig
+getSlackConfig = do
+    x <- lookupEnv "SLACK_API_TOKEN"
+    let apiToken = fromMaybe (error "SLACK_API_TOKEN not set") x
+    return SlackConfig{ _slackApiToken = apiToken }
 
 getCheckinLog :: IO FilePath
 getCheckinLog = do
