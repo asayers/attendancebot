@@ -13,6 +13,7 @@ import Control.Monad
 import Control.Monad.Except
 import Data.Default.Class
 import Data.List (find, sort)
+import Data.Maybe
 import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -20,6 +21,7 @@ import Data.Thyme
 import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
 import System.Cron.Schedule
+import System.Environment
 import System.Locale
 import System.Process
 import Web.Slack hiding (lines)
@@ -29,15 +31,17 @@ import Web.Slack hiding (lines)
 -------------------------------------------------------------------------------
 
 main :: IO ()
-main = withAttnH slackConfig $ \h -> do
-    -- initialise state
-    runAttendance h $ do
-        traverseOf_ (slackIms . traverse) trackUser =<< getSession
-        mapM_ addCheckIn =<< liftIO (readCheckIns checkinLog)
-    -- start cron thread
-    void $ execSchedule $ schedule h
-    -- run main loop
-    runAttendance h $ forever (getNextEvent >>= handleEvent)
+main = do
+    checkinLog <- getCheckinLog
+    withAttnH slackConfig checkinLog $ \h -> do
+        -- initialise state
+        runAttendance h $ do
+            traverseOf_ (slackIms . traverse) trackUser =<< getSession
+            mapM_ addCheckIn =<< getCheckInHistory
+        -- start cron thread
+        void $ execSchedule $ schedule h
+        -- run main loop
+        runAttendance h $ forever (getNextEvent >>= handleEvent)
 
 handleEvent :: Event -> Attendance ()
 handleEvent = \case
@@ -61,8 +65,11 @@ schedule h = do
 slackConfig :: SlackConfig
 slackConfig = SlackConfig { _slackApiToken = "" }
 
-checkinLog :: FilePath
-checkinLog = ""
+getCheckinLog :: IO FilePath
+getCheckinLog = do
+    checkinLog <- fromMaybe (error "CHECKIN_LOG not set") <$> lookupEnv "CHECKIN_LOG"
+    ensureExists checkinLog
+    return checkinLog
 
 -- | Users which we want to ignore
 blacklist :: [UserId]
@@ -98,7 +105,7 @@ checkin :: CheckIn -> Attendance ()
 checkin ci@CheckIn{..} =
     when (ciUser /= user_me) $ do
         addCheckIn ci
-        liftIO $ writeCheckIn checkinLog ci
+        logCheckIn ci
         sendIM ciUser "Your attendance has been noted. Have a good day!"
 
 dailySummary :: Attendance ()

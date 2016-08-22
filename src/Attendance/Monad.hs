@@ -14,6 +14,8 @@ module Attendance.Monad
     , getTimeSheet
     , addCheckIn
     , addTrackedUser
+    , logCheckIn
+    , getCheckInHistory
     ) where
 
 import Attendance.CheckIn
@@ -39,12 +41,13 @@ data AttnH = AttnH
 data AttnS = AttnS
     { _trackedUsers :: HMS.HashMap UserId ChannelId
     , _timeSheet :: TimeSheet
+    , _checkinLog :: FilePath
     }
 
 makeLenses ''AttnS
 
-withAttnH :: SlackConfig -> (AttnH -> IO a) -> IO a
-withAttnH conf fn = withSlackHandle conf $ \slackH -> do
+withAttnH :: SlackConfig -> FilePath -> (AttnH -> IO a) -> IO a
+withAttnH conf _checkinLog fn = withSlackHandle conf $ \slackH -> do
     _timeSheet <- newTimeSheet
     let _trackedUsers = HMS.empty
     attnS <- newIORef AttnS{..}
@@ -79,3 +82,12 @@ addCheckIn ci = modifyAttnS $ over timeSheet (updateTimeSheet ci)
 
 addTrackedUser :: UserId -> ChannelId -> Attendance ()
 addTrackedUser uid cid = modifyAttnS $ over trackedUsers (HMS.insert uid cid)
+
+logCheckIn :: CheckIn -> Attendance ()
+logCheckIn ci = do
+    AttnS{..} <- readAttnS
+    liftIO $ writeCheckIn _checkinLog ci
+
+getCheckInHistory :: Attendance [CheckIn]
+getCheckInHistory =
+    liftIO . readCheckIns . view checkinLog =<< readAttnS
