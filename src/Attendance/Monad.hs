@@ -2,30 +2,38 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Attendance.Monad
     ( AttnH, withAttnH
     , Attendance, runAttendance
 
-      -- * Primitive Attendance monad actions
+      -- * Modifying
+    , checkin
+    , markInactive
+    , markActive
+    , trackUser
+
+      -- * Querying
+    , getTimeSheet
     , getTrackedUsers
     , lookupIMChannel
     , channelIsIM
-    , getTimeSheet
-    , addCheckIn
-    , addTrackedUser
-    , logCheckIn
-    , getCheckInHistory
+
+      -- * Slack
+    , sendIM
     ) where
 
-import Attendance.CheckIn
+import Attendance.Log
 import Attendance.TimeSheet
-import Control.Lens
+import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
+import qualified Attendance.UserTracker as UT
 import Control.Monad.Reader
-import qualified Data.HashMap.Strict as HMS
-import Data.IORef
-import Web.Slack.Handle (SlackHandle, withSlackHandle)
-import Web.Slack.Monad
+import qualified Data.Text as T
+import Data.Thyme
+import Web.Slack.Handle (SlackHandle, withSlackHandle, getSession)
+import Web.Slack.Monad hiding (getSession)
 
 newtype Attendance a = Attendance (ReaderT AttnH IO a)
     deriving (Functor, Applicative, Monad, MonadIO)
@@ -35,59 +43,68 @@ instance MonadSlack Attendance where
 
 data AttnH = AttnH
     { slackH :: SlackHandle
-    , attnS :: IORef AttnS
+    , trackerH :: TrackerHandle
+    , stateH :: LogHandle TimeSheetUpdate TimeSheet
     }
 
-data AttnS = AttnS
-    { _trackedUsers :: HMS.HashMap UserId ChannelId
-    , _timeSheet :: TimeSheet
-    , _checkinLog :: FilePath
-    }
-
-makeLenses ''AttnS
-
-withAttnH :: SlackConfig -> FilePath -> (AttnH -> IO a) -> IO a
-withAttnH conf _checkinLog fn = withSlackHandle conf $ \slackH -> do
-    _timeSheet <- newTimeSheet
-    let _trackedUsers = HMS.empty
-    attnS <- newIORef AttnS{..}
+withAttnH :: SlackConfig -> FilePath -> [UserId] -> (AttnH -> IO a) -> IO a
+withAttnH conf logPath blacklist fn = withSlackHandle conf $ \slackH -> do
+    timeSheet <- newTimeSheet
+    stateH <- newLogHandle updateTimeSheet timeSheetUpdate timeSheet logPath
+    trackerH <- newTrackerHandle (getSession slackH) blacklist
     fn AttnH{..}
 
 runAttendance :: AttnH -> Attendance a -> IO a
 runAttendance attnH (Attendance ma) = do
     runReaderT ma attnH
 
-readAttnS :: Attendance AttnS
-modifyAttnS :: (AttnS -> AttnS) -> Attendance ()
-readAttnS      = Attendance $ liftIO . readIORef           . attnS =<< ask
-modifyAttnS fn = Attendance $ liftIO . flip modifyIORef fn . attnS =<< ask
+getAttnH :: Attendance AttnH
+getAttnH = Attendance ask
 
 -------------------------------------------------------------------------------
--- Primitive Attendance monad actions
+-- TimeSheet
 
-getTrackedUsers :: Attendance [UserId]
-getTrackedUsers = HMS.keys . view trackedUsers <$> readAttnS
+checkin :: UserId -> UTCTime -> Attendance ()
+checkin uid ts = do
+    modifyTimeSheet $ CheckIn uid ts
+    sendIM uid "Your attendance has been noted. Have a good day!"
 
-lookupIMChannel :: UserId -> Attendance (Maybe ChannelId)
-lookupIMChannel uid = HMS.lookup uid . view trackedUsers <$> readAttnS
+markInactive :: UserId -> UTCTime -> Attendance ()
+markInactive uid ts = do
+    modifyTimeSheet $ MarkInactive uid ts
+    sendIM uid "You will be marked as inactive from tomorrow onwards. Have a nice holiday!"
 
-channelIsIM :: ChannelId -> Attendance Bool
-channelIsIM cid = (cid `elem`) . HMS.elems . view trackedUsers <$> readAttnS
+markActive :: UserId -> UTCTime -> Attendance ()
+markActive uid ts = do
+    modifyTimeSheet $ MarkActive uid ts
+    sendIM uid "Welcome back! You have been marked as active from today onwards."
+
+modifyTimeSheet :: TimeSheetUpdate -> Attendance ()
+modifyTimeSheet ev = liftIO . flip logEvent ev . stateH =<< getAttnH
 
 getTimeSheet :: Attendance TimeSheet
-getTimeSheet = view timeSheet <$> readAttnS
+getTimeSheet = liftIO . getCurState . stateH =<< getAttnH
 
-addCheckIn :: CheckIn -> Attendance ()
-addCheckIn ci = modifyAttnS $ over timeSheet (updateTimeSheet ci)
+-------------------------------------------------------------------------------
+-- UserTracker
 
-addTrackedUser :: UserId -> ChannelId -> Attendance ()
-addTrackedUser uid cid = modifyAttnS $ over trackedUsers (HMS.insert uid cid)
+trackUser :: IM -> Attendance ()
+trackUser im = getAttnH >>= \h -> liftIO $ UT.trackUser (trackerH h) im
 
-logCheckIn :: CheckIn -> Attendance ()
-logCheckIn ci = do
-    AttnS{..} <- readAttnS
-    liftIO $ writeCheckIn _checkinLog ci
+getTrackedUsers :: Attendance [UserId]
+getTrackedUsers = getAttnH >>= \h -> liftIO $ UT.getTrackedUsers (trackerH h)
 
-getCheckInHistory :: Attendance [CheckIn]
-getCheckInHistory =
-    liftIO . readCheckIns . view checkinLog =<< readAttnS
+lookupIMChannel :: UserId -> Attendance (Maybe ChannelId)
+lookupIMChannel uid = getAttnH >>= \h -> liftIO $ UT.lookupIMChannel (trackerH h) uid
+
+channelIsIM :: ChannelId -> Attendance Bool
+channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
+
+-------------------------------------------------------------------------------
+-- Slack helpers
+
+sendIM :: UserId -> T.Text -> Attendance ()
+sendIM uid msg =
+    lookupIMChannel uid >>= \case
+        Just cid -> sendMessage cid msg
+        Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid

@@ -19,9 +19,11 @@ executable attendancebot
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:
-        Attendance.CheckIn
+        Attendance.Log
       , Attendance.Monad
+      , Attendance.Report
       , Attendance.TimeSheet
+      , Attendance.UserTracker
   build-depends:
         base >= 4.7 && < 5
       , Chart >= 1.6

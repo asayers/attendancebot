@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | This module contains functionality for analysing user check-ins. Only
@@ -10,6 +11,9 @@ module Attendance.TimeSheet
     ( TimeSheet
     , newTimeSheet
     , updateTimeSheet
+
+    , TimeSheetUpdate(..)
+    , timeSheetUpdate
 
     , Timing(..)
     , lookupTiming
@@ -25,21 +29,78 @@ module Attendance.TimeSheet
     , getThisWeek
     ) where
 
-import Attendance.CheckIn
 import Control.Lens
 import Control.Monad
 import Data.AffineSpace
 import qualified Data.HashMap.Strict as HMS
 import Data.Hashable
 import Data.List
+import Data.Monoid
+import qualified Data.Text as T
 import Data.Thyme
 import Data.Thyme.Calendar.WeekDate
 import Graphics.Rendering.Chart.Backend.Cairo
 import Graphics.Rendering.Chart.Easy
-import Web.Slack
+import System.Locale
+import Web.Slack hiding (lines)
+
+-------------------------------------------------------------------------------
+
+data TimeSheetUpdate
+    = CheckIn UserId UTCTime
+    | MarkInactive UserId UTCTime -- ^ The user is inactive as of the specified time
+    | MarkActive UserId UTCTime -- ^ The user is active as of the specified time
+
+instance Show TimeSheetUpdate where
+    show entry = case entry of
+        CheckIn  uid ts -> showUidTs "Check-in" uid ts
+        MarkInactive uid ts -> showUidTs "Inactive" uid ts
+        MarkActive   uid ts -> showUidTs "Active" uid ts
+      where
+        showUidTs name (Id uid) ts = unwords
+            [ name <> ":", T.unpack uid, "at"
+            , formatTime defaultTimeLocale "%H:%M" ts
+            ]
+
+timeSheetUpdate :: Prism' T.Text TimeSheetUpdate
+timeSheetUpdate = prism' pp parse
+  where
+    pp entry = case entry of
+        (CheckIn  (Id uid) ts)  -> "checkin\t" <> review posixTime ts <> "\t" <> uid
+        (MarkActive   (Id uid) ts)   -> "active\t" <> review posixTime ts <> "\t" <> uid
+        (MarkInactive (Id uid) ts) -> "inactive\t" <> review posixTime ts <> "\t" <> uid
+    parse txt = case T.splitOn "\t" txt of
+        [x,y,z] | x == "checkin"  -> CheckIn  (Id z) <$> preview posixTime y
+        [x,y,z] | x == "active"   -> MarkActive   (Id z) <$> preview posixTime y
+        [x,y,z] | x == "inactive" -> MarkInactive (Id z) <$> preview posixTime y
+        _ -> Nothing
+
+posixTime :: Prism' T.Text UTCTime
+posixTime = prism' pp parse
+  where
+    pp = T.pack . formatTime defaultTimeLocale "%s"
+    parse = parseTime defaultTimeLocale "%s" . T.unpack
+
+-------------------------------------------------------------------------------
+
+-- | A closed or right-open interval over days. Bounds are inclusive.
+data Holiday = CompletedHoliday Day Day | OngoingHoliday Day deriving (Eq)
+
+startHoliday :: Day -> [Holiday] -> [Holiday]
+startHoliday start hols = case hols of
+    OngoingHoliday _ : _ -> hols
+    _ -> OngoingHoliday start : hols
+
+endHoliday :: Day -> [Holiday] -> [Holiday]
+endHoliday end hols = case hols of
+    OngoingHoliday start : xs -> CompletedHoliday start end : xs
+    _ -> hols
+
+-------------------------------------------------------------------------------
 
 data TimeSheet = TimeSheet
     { _tsCheckIns :: HMS.HashMap (UserId, Day) TimeOfDay -- These times are local
+    , _tsHolidays :: HMS.HashMap UserId [Holiday]
     , _tsTimeZone :: TimeZone
     }
 
@@ -52,12 +113,20 @@ newTimeSheet :: IO TimeSheet
 newTimeSheet = do
     _tsTimeZone <- getCurrentTimeZone
     let _tsCheckIns = HMS.empty
+    let _tsHolidays = HMS.empty
     return TimeSheet{..}
 
-updateTimeSheet :: CheckIn -> TimeSheet -> TimeSheet
-updateTimeSheet CheckIn{..} ts =
-    let LocalTime day tod = ciTimestamp ^. utcLocalTime (ts ^. tsTimeZone)
-    in over tsCheckIns (HMS.insertWith min (ciUser, day) tod) ts
+updateTimeSheet :: TimeSheetUpdate -> TimeSheet -> TimeSheet
+updateTimeSheet entry ts = case entry of
+    CheckIn uid time ->
+        let LocalTime day tod = time ^. utcLocalTime (ts ^. tsTimeZone)
+        in over tsCheckIns (HMS.insertWith min (uid, day) tod) ts
+    MarkInactive uid time ->
+        let LocalTime day _ = time ^. utcLocalTime (ts ^. tsTimeZone)
+        in over (tsHolidays . at uid . non []) (startHoliday (day .+^ 1)) ts
+    MarkActive uid time ->
+        let LocalTime day _ = time ^. utcLocalTime (ts ^. tsTimeZone)
+        in over (tsHolidays . at uid . non []) (endHoliday day) ts
 
 -------------------------------------------------------------------------------
 
@@ -65,12 +134,13 @@ data Timing
     = OnTime TimeOfDay
     | Late TimeOfDay
     | Absent
+    | OnHoliday
     deriving (Eq, Ord, Show)
 
-isOnTime, isLate, isAbsent :: Timing -> Bool
+isOnTime, isLate :: Timing -> Bool
 isOnTime = \case OnTime _ -> True; _ -> False
 isLate   = \case Late   _ -> True; _ -> False
-isAbsent = \case Absent   -> True; _ -> False
+-- isAbsent = \case Absent   -> True; _ -> False
 
 lookupTiming :: TimeSheet -> UserId -> Day -> Timing
 lookupTiming ts uid day =
