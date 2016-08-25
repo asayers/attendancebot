@@ -15,6 +15,8 @@ import qualified Data.Text as T
 import Data.Thyme
 import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
+import Data.Time.Zones
+import Data.Time.Zones.All
 import System.Cron.Schedule
 import System.Environment
 import Web.Slack hiding (lines)
@@ -25,7 +27,7 @@ main :: IO ()
 main = do
     slackConfig <- getSlackConfig
     logPath <- getCheckinLog
-    withAttnH slackConfig logPath blacklist $ \h -> do
+    withAttnH slackConfig logPath blacklist timezone deadline $ \h -> do
         -- start cron thread
         void $ execSchedule $ schedule h
         -- run main loop
@@ -60,6 +62,12 @@ blacklist :: [UserId]
 blacklist =
     [ Id "USLACKBOT" -- @slackbot
     ]
+
+timezone :: TZ
+timezone = tzByLabel Asia__Tokyo
+
+deadline :: TimeOfDay
+deadline = TimeOfDay 9 0 (fromSeconds' 0)  -- 9am JST
 
 -- TODO: Get this from session
 user_me :: UserId

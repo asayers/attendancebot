@@ -18,19 +18,12 @@ module Attendance.TimeSheet
     , Timing(..)
     , lookupTiming
 
-    , summaryOfDay
-    , makeChart
     , lateComers
+    , allUsers
     , goodRunLength
-
-    , today
-    , yesterday
-    , getMonday
-    , getThisWeek
     ) where
 
 import Control.Lens
-import Control.Monad
 import Data.AffineSpace
 import qualified Data.HashMap.Strict as HMS
 import Data.Hashable
@@ -38,11 +31,87 @@ import Data.List
 import Data.Monoid
 import qualified Data.Text as T
 import Data.Thyme
-import Data.Thyme.Calendar.WeekDate
-import Graphics.Rendering.Chart.Backend.Cairo
-import Graphics.Rendering.Chart.Easy
+import Data.Thyme.Time
+import Data.Time.Zones
 import System.Locale
 import Web.Slack hiding (lines)
+
+-------------------------------------------------------------------------------
+
+-- All values of type TimeOfDay are local to _tsTimeZone
+data TimeSheet = TimeSheet
+    { _tsCheckIns :: HMS.HashMap (UserId, Day) TimeOfDay
+    , _tsHolidays :: HMS.HashMap UserId [Holiday]
+    , _tsTimeZone :: TZ
+    , _tsDeadline :: TimeOfDay  -- ^ When should users have checked in by?
+    }
+
+-- | A closed or right-open interval over days. Bounds are inclusive.
+data Holiday = CompletedHoliday Day Day | OngoingHoliday Day deriving (Eq, Show)
+
+-- TODO: Remove once liyang uploads the next version of thyme
+instance Hashable Day
+
+makeLenses ''TimeSheet
+
+newTimeSheet :: TZ -> TimeOfDay -> TimeSheet
+newTimeSheet _tsTimeZone _tsDeadline =
+    let _tsCheckIns = HMS.empty
+        _tsHolidays = HMS.empty
+    in TimeSheet{..}
+
+updateTimeSheet :: TimeSheetUpdate -> TimeSheet -> TimeSheet
+updateTimeSheet entry ts = case entry of
+    CheckIn uid time ->
+        let LocalTime day tod = toLocalTime time
+        in over tsCheckIns (HMS.insertWith min (uid, day) tod) ts
+    MarkInactive uid time ->
+        let LocalTime day _ = toLocalTime time
+        in over (tsHolidays . at uid . non []) (startHoliday (day .+^ 1)) ts
+    MarkActive uid time ->
+        let LocalTime day _ = toLocalTime time
+        in over (tsHolidays . at uid . non []) (endHoliday day) ts
+  where
+    toLocalTime = toThyme . utcToLocalTimeTZ (ts ^. tsTimeZone) . fromThyme
+
+startHoliday :: Day -> [Holiday] -> [Holiday]
+startHoliday start hols = case hols of
+    OngoingHoliday _ : _ -> hols      -- holiday in progress; do nothing
+    _ -> OngoingHoliday start : hols  -- start a holiday
+
+endHoliday :: Day -> [Holiday] -> [Holiday]
+endHoliday end hols = case hols of
+    OngoingHoliday start : xs -> CompletedHoliday start end : xs
+    _ -> hols                        -- no holiday in progress; do nothing
+
+-------------------------------------------------------------------------------
+
+data Timing
+    = OnTime TimeOfDay
+    | Late TimeOfDay
+    | Absent
+    | OnHoliday
+    deriving (Eq, Ord, Show)
+
+lookupTiming :: TimeSheet -> UserId -> Day -> Timing
+lookupTiming ts uid day =
+    case HMS.lookup (uid, day) (ts ^. tsCheckIns) of
+        _ | isOnHoliday ts uid day     -> OnHoliday
+        Just tod
+            | tod < (ts ^. tsDeadline) -> OnTime tod
+            | otherwise                -> Late tod
+        Nothing                        -> Absent
+
+-- TODO: We could improve performance by using the assumption that holidays
+-- are ordered to short-circuit.
+isOnHoliday :: TimeSheet -> UserId -> Day -> Bool
+isOnHoliday ts uid day =
+    anyOf (tsHolidays . ix uid . traverse) (day `isInHoliday`) ts
+
+isInHoliday :: Day -> Holiday -> Bool
+isInHoliday day hol = case hol of
+    OngoingHoliday   start     -> day >= start
+    CompletedHoliday start end -> day >= start && day <= end
 
 -------------------------------------------------------------------------------
 
@@ -83,81 +152,6 @@ posixTime = prism' pp parse
 
 -------------------------------------------------------------------------------
 
--- | A closed or right-open interval over days. Bounds are inclusive.
-data Holiday = CompletedHoliday Day Day | OngoingHoliday Day deriving (Eq)
-
-startHoliday :: Day -> [Holiday] -> [Holiday]
-startHoliday start hols = case hols of
-    OngoingHoliday _ : _ -> hols
-    _ -> OngoingHoliday start : hols
-
-endHoliday :: Day -> [Holiday] -> [Holiday]
-endHoliday end hols = case hols of
-    OngoingHoliday start : xs -> CompletedHoliday start end : xs
-    _ -> hols
-
--------------------------------------------------------------------------------
-
-data TimeSheet = TimeSheet
-    { _tsCheckIns :: HMS.HashMap (UserId, Day) TimeOfDay -- These times are local
-    , _tsHolidays :: HMS.HashMap UserId [Holiday]
-    , _tsTimeZone :: TimeZone
-    }
-
--- TODO: Remove once liyang uploads the next version of thyme
-instance Hashable Day
-
-makeLenses ''TimeSheet
-
-newTimeSheet :: IO TimeSheet
-newTimeSheet = do
-    _tsTimeZone <- getCurrentTimeZone
-    let _tsCheckIns = HMS.empty
-    let _tsHolidays = HMS.empty
-    return TimeSheet{..}
-
-updateTimeSheet :: TimeSheetUpdate -> TimeSheet -> TimeSheet
-updateTimeSheet entry ts = case entry of
-    CheckIn uid time ->
-        let LocalTime day tod = time ^. utcLocalTime (ts ^. tsTimeZone)
-        in over tsCheckIns (HMS.insertWith min (uid, day) tod) ts
-    MarkInactive uid time ->
-        let LocalTime day _ = time ^. utcLocalTime (ts ^. tsTimeZone)
-        in over (tsHolidays . at uid . non []) (startHoliday (day .+^ 1)) ts
-    MarkActive uid time ->
-        let LocalTime day _ = time ^. utcLocalTime (ts ^. tsTimeZone)
-        in over (tsHolidays . at uid . non []) (endHoliday day) ts
-
--------------------------------------------------------------------------------
-
-data Timing
-    = OnTime TimeOfDay
-    | Late TimeOfDay
-    | Absent
-    | OnHoliday
-    deriving (Eq, Ord, Show)
-
-isOnTime, isLate :: Timing -> Bool
-isOnTime = \case OnTime _ -> True; _ -> False
-isLate   = \case Late   _ -> True; _ -> False
--- isAbsent = \case Absent   -> True; _ -> False
-
-lookupTiming :: TimeSheet -> UserId -> Day -> Timing
-lookupTiming ts uid day =
-    case HMS.lookup (uid, day) (ts ^. tsCheckIns) of
-        Just tod
-            | tod < nineOClock -> OnTime tod
-            | otherwise        -> Late tod
-        Nothing                -> Absent
-  where
-    nineOClock :: TimeOfDay
-    nineOClock = TimeOfDay 9 0 (fromSeconds' 0)
-
-allUsers :: TimeSheet -> [UserId]
-allUsers = nub . map fst . HMS.keys . view tsCheckIns
-
--------------------------------------------------------------------------------
-
 -- userHistory :: UserId -> TimeSheet -> HMS.HashMap Day TimeOfDay
 -- userHistory target timeSheet =
 --     mapKeys snd $ HMS.filterWithKey (\(uid,_) _ -> uid == target) timeSheet
@@ -167,66 +161,18 @@ allUsers = nub . map fst . HMS.keys . view tsCheckIns
 --     today <- localDay . zonedTimeToLocalTime <$> getZonedTime
 --     return $ mapKeys fst $ HMS.filterWithKey (\(_,day) _ -> day == today) timeSheet
 
-summaryOfDay :: TimeSheet -> Day -> (PlotIndex, [Int])
-summaryOfDay ts day =
-    (PlotIndex (fromEnum day), [onTime, late])
-  where
-    checkins = map (\uid -> lookupTiming ts uid day) (allUsers ts)
-    onTime = length $ filter isOnTime checkins
-    late   = length $ filter isLate   checkins
-
-makeChart :: TimeSheet -> FilePath -> IO ()
-makeChart ts outpath = do
-    recentDays <- take 20 . pastWeekDays <$> today
-    let dataset = map (summaryOfDay ts) recentDays
-    let chart = def
-          & plot_bars_titles .~ ["On time","Late"]
-          & plot_bars_style .~ BarsStacked
-          & plot_bars_values .~ dataset
-    let layout = def & layout_plots .~ [ plotBars chart ]
-    let fileOpts = FileOptions{ _fo_size = (400,150), _fo_format = PNG }
-    void $ renderableToFile fileOpts outpath (layoutToRenderable layout)
-
-goodRunLength :: TimeSheet -> Day -> Int
-goodRunLength ts start =
-    let isGood = null . lateComers ts
-    in length $ takeWhile isGood $ map (start .-^) [0..]
-
 lateComers :: TimeSheet -> Day -> [UserId]
 lateComers ts day =
     let late uid = case lookupTiming ts uid day of OnTime _ -> False; _ -> True
     in filter late (allUsers ts)
 
--------------------------------------------------------------------------------
+allUsers :: TimeSheet -> [UserId]
+allUsers = nub . map fst . HMS.keys . view tsCheckIns
 
--- | The weekdays (excluding the weekend) of the current week.
-getThisWeek :: IO [Day]
-getThisWeek = do
-    x <- view weekDate <$> today
-    return $ map (\day -> review weekDate x{ wdDay = day }) [1..5]
-
--- getThisMonth :: IO [Day]
--- getThisMonth = fmap (view weekDate) today <&> \WeekDate{..} ->
---     [ review weekDate (WeekDate wdYear w d)
---     | w <- map (\i -> wdWeek - i) [0,1,2], d <- [1..5]
---     ]
-
--- | The monday of the current week
-getMonday :: IO Day
-getMonday = do
-    x <- view weekDate <$> today
-    return $ review weekDate x{ wdDay = 1 }
-
-today :: IO Day
-today = localDay . zonedTimeToLocalTime <$> getZonedTime
-
-yesterday :: IO Day
-yesterday = head . drop 1 . pastWeekDays <$> today
-
--- | An infinite list of weekdays, in reverse order, starting from the
--- given day and working backwards (inclusive).
-pastWeekDays :: Day -> [Day]
-pastWeekDays d = map (d .-^ ) [0..]   -- FIXME
+goodRunLength :: TimeSheet -> Day -> Int
+goodRunLength ts start =
+    let isGood = null . lateComers ts
+    in length $ takeWhile isGood $ map (start .-^) [0..]
 
 -------------------------------------------------------------------------------
 

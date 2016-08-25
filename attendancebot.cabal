@@ -36,6 +36,7 @@ executable attendancebot
       , hashable >= 1.2
       , lens >= 4.13
       , mtl >= 2.2
+      , tz >= 0.1.1
       , old-locale
       , process >= 1.2.3
       , slack-api >= 0.9

@@ -18,7 +18,6 @@ module Attendance.Monad
       -- * Querying
     , getTimeSheet
     , getTrackedUsers
-    , lookupIMChannel
     , channelIsIM
 
       -- * Slack
@@ -32,6 +31,7 @@ import qualified Attendance.UserTracker as UT
 import Control.Monad.Reader
 import qualified Data.Text as T
 import Data.Thyme
+import Data.Time.Zones
 import Web.Slack.Handle (SlackHandle, withSlackHandle, getSession)
 import Web.Slack.Monad hiding (getSession)
 
@@ -47,9 +47,9 @@ data AttnH = AttnH
     , stateH :: LogHandle TimeSheetUpdate TimeSheet
     }
 
-withAttnH :: SlackConfig -> FilePath -> [UserId] -> (AttnH -> IO a) -> IO a
-withAttnH conf logPath blacklist fn = withSlackHandle conf $ \slackH -> do
-    timeSheet <- newTimeSheet
+withAttnH :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> (AttnH -> IO a) -> IO a
+withAttnH conf logPath blacklist tz deadline fn = withSlackHandle conf $ \slackH -> do
+    let timeSheet = newTimeSheet tz deadline
     stateH <- newLogHandle updateTimeSheet timeSheetUpdate timeSheet logPath
     trackerH <- newTrackerHandle (getSession slackH) blacklist
     fn AttnH{..}
@@ -94,9 +94,6 @@ trackUser im = getAttnH >>= \h -> liftIO $ UT.trackUser (trackerH h) im
 getTrackedUsers :: Attendance [UserId]
 getTrackedUsers = getAttnH >>= \h -> liftIO $ UT.getTrackedUsers (trackerH h)
 
-lookupIMChannel :: UserId -> Attendance (Maybe ChannelId)
-lookupIMChannel uid = getAttnH >>= \h -> liftIO $ UT.lookupIMChannel (trackerH h) uid
-
 channelIsIM :: ChannelId -> Attendance Bool
 channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
 
@@ -104,7 +101,8 @@ channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
 -- Slack helpers
 
 sendIM :: UserId -> T.Text -> Attendance ()
-sendIM uid msg =
-    lookupIMChannel uid >>= \case
+sendIM uid msg = do
+    h <- trackerH <$> getAttnH
+    liftIO (UT.lookupIMChannel h uid) >>= \case
         Just cid -> sendMessage cid msg
         Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid

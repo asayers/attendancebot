@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Attendance.Report
     ( dailySummary
@@ -11,13 +12,17 @@ import Attendance.TimeSheet
 import Control.Lens
 import Control.Monad
 import Control.Monad.Except
+import Data.AffineSpace
 import Data.List (find, sort)
 import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Thyme
+import Data.Thyme.Calendar.WeekDate
 import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
+import Graphics.Rendering.Chart.Backend.Cairo
+import Graphics.Rendering.Chart.Easy
 import System.Locale
 import System.Process
 import Web.Slack hiding (lines)
@@ -43,6 +48,9 @@ dailySummary = do
                  "This ends a streak of " <> T.pack (show streak) <>
                  pl streak " day." " days."
         _ -> listEN missing <> " still " <> pl (length missing) "hasn't" "haven't" <> " checked in."
+
+-------------------------------------------------------------------------------
+-- Weekly summary
 
 weeklySummary :: Attendance Attachment
 weeklySummary = do
@@ -78,6 +86,9 @@ summaryRow uid = do
     badge Absent     = '◇' -- '□'  -- '◽' -- '◻'-- '□'
     badge OnHoliday  = 'H' -- '□'  -- '◽' -- '◻'-- '□'
 
+-------------------------------------------------------------------------------
+-- Weekly summary chart
+
 renderWeeklySummaryChart :: Attendance T.Text
 renderWeeklySummaryChart = do
     timeSheet <- getTimeSheet
@@ -86,12 +97,73 @@ renderWeeklySummaryChart = do
     liftIO $ callCommand $ "scp out.png alex@www.asayers.org:/var/www/asayers.org/html/attendance/" ++ timestamp ++ ".png"
     return $ T.pack $ "http://www.asayers.org/attendance/" ++ timestamp ++ ".png"
 
+makeChart :: TimeSheet -> FilePath -> IO ()
+makeChart ts outpath = do
+    recentDays <- take 20 . pastWeekDays <$> today
+    let dataset = map (summaryOfDay ts) recentDays
+    let chart = def
+          & plot_bars_titles .~ ["On time","Late"]
+          & plot_bars_style .~ BarsStacked
+          & plot_bars_values .~ dataset
+    let layout = def & layout_plots .~ [ plotBars chart ]
+    let fileOpts = FileOptions{ _fo_size = (400,150), _fo_format = PNG }
+    void $ renderableToFile fileOpts outpath (layoutToRenderable layout)
+
+summaryOfDay :: TimeSheet -> Day -> (PlotIndex, [Int])
+summaryOfDay ts day =
+    (PlotIndex (fromEnum day), [onTime, late])
+  where
+    checkins = map (\uid -> lookupTiming ts uid day) (allUsers ts)
+    onTime = length $ filter isOnTime checkins
+    late   = length $ filter isLate   checkins
+
+isOnTime, isLate :: Timing -> Bool
+isOnTime = \case OnTime _ -> True; _ -> False
+isLate   = \case Late   _ -> True; _ -> False
+-- isAbsent = \case Absent   -> True; _ -> False
+
+-------------------------------------------------------------------------------
+-- Time helpers
+
+today :: IO Day
+today = localDay . zonedTimeToLocalTime <$> getZonedTime
+
+yesterday :: IO Day
+yesterday = head . drop 1 . pastWeekDays <$> today
+
+-- | An infinite list of weekdays, in reverse order, starting from the
+-- given day and working backwards (inclusive).
+pastWeekDays :: Day -> [Day]
+pastWeekDays d = map (d .-^ ) [0..]   -- FIXME
+
+-- | The weekdays (excluding the weekend) of the current week.
+getThisWeek :: IO [Day]
+getThisWeek = do
+    x <- view weekDate <$> today
+    return $ map (\day -> review weekDate x{ wdDay = day }) [1..5]
+
+-- getThisMonth :: IO [Day]
+-- getThisMonth = fmap (view weekDate) today <&> \WeekDate{..} ->
+--     [ review weekDate (WeekDate wdYear w d)
+--     | w <- map (\i -> wdWeek - i) [0,1,2], d <- [1..5]
+--     ]
+
+-- | The monday of the current week
+getMonday :: IO Day
+getMonday = do
+    x <- view weekDate <$> today
+    return $ review weekDate x{ wdDay = 1 }
+
+-------------------------------------------------------------------------------
+
 -- | The user must already exist when the connection to slack is established.
 getUserName :: MonadSlack m => UserId -> m T.Text
 getUserName uid =
     maybe "unknown" _userName .
     find (\user -> _userId user == uid) .
     _slackUsers <$> getSession
+
+-------------------------------------------------------------------------------
 
 listEN :: [T.Text] -> T.Text
 listEN [] = ""

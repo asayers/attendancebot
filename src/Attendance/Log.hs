@@ -30,7 +30,7 @@ data Handle' ev st = Handle'
 
 newLogHandle :: (ev -> st -> st) -> Prism' Text ev -> st -> FilePath -> IO (LogHandle ev st)
 newLogHandle updateState serialiseEvent initialState logPath = do
-    -- ensureExists logPath
+    ensureExists logPath
     let loggedEvents = lined . T.packed . pre serialiseEvent . _Just
     curState <- foldrOf loggedEvents updateState initialState <$> readFile logPath
     let !h = Handle'{..}
