@@ -134,14 +134,14 @@ instance Show TimeSheetUpdate where
 timeSheetUpdate :: Prism' T.Text TimeSheetUpdate
 timeSheetUpdate = prism' pp parse
   where
-    pp entry = case entry of
-        (CheckIn  (Id uid) ts)  -> "checkin\t" <> review posixTime ts <> "\t" <> uid
-        (MarkActive   (Id uid) ts)   -> "active\t" <> review posixTime ts <> "\t" <> uid
-        (MarkInactive (Id uid) ts) -> "inactive\t" <> review posixTime ts <> "\t" <> uid
+    pp entry = T.intercalate "\t" $ case entry of
+        CheckIn      (Id uid) ts -> ["checkin" , review posixTime ts, uid]
+        MarkActive   (Id uid) ts -> ["active"  , review posixTime ts, uid]
+        MarkInactive (Id uid) ts -> ["inactive", review posixTime ts, uid]
     parse txt = case T.splitOn "\t" txt of
-        [x,y,z] | x == "checkin"  -> CheckIn  (Id z) <$> preview posixTime y
-        [x,y,z] | x == "active"   -> MarkActive   (Id z) <$> preview posixTime y
-        [x,y,z] | x == "inactive" -> MarkInactive (Id z) <$> preview posixTime y
+        [name,ts,uid] | name == "checkin"  -> CheckIn      (Id uid) <$> preview posixTime ts
+        [name,ts,uid] | name == "active"   -> MarkActive   (Id uid) <$> preview posixTime ts
+        [name,ts,uid] | name == "inactive" -> MarkInactive (Id uid) <$> preview posixTime ts
         _ -> Nothing
 
 posixTime :: Prism' T.Text UTCTime
