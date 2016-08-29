@@ -42,6 +42,7 @@ handleEvent ev = case ev of
         when (isIM && uid /= user_me) $ case msg of
             "active" -> markActive uid ts
             "inactive" -> markInactive uid ts
+            "debug" -> dumpDebug uid scheduledJobs
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
             _ -> checkin uid ts
     ImCreated _ im -> trackUser im

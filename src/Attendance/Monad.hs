@@ -31,6 +31,7 @@ module Attendance.Monad
     , sendIM
     , sendRichIM
     , getUsername
+    , dumpDebug
     ) where
 
 import Attendance.Log
@@ -117,6 +118,20 @@ modifyTimeSheet ev = liftIO . flip logEvent ev . stateH =<< getAttnH
 
 getTimeSheet :: Attendance TimeSheet
 getTimeSheet = liftIO . getCurState . stateH =<< getAttnH
+
+dumpDebug :: UserId -> [CronJob (T.Text, a)] -> Attendance ()
+dumpDebug uid scheduledJobs = do
+    ts <- getTimeSheet
+    curTime <- liftIO $ getCurrentTime
+    session <- getSession
+    let getUsername' target = maybe "unknown" _userName $
+            find (\user -> _userId user == target) (_slackUsers session)
+    sendIM uid $ T.unlines
+        [ "```"
+        , prettyPrintTimesheet ts curTime getUsername'
+        , prettyPrintJobs fst scheduledJobs
+        , "```"
+        ]
 
 -------------------------------------------------------------------------------
 -- UserTracker

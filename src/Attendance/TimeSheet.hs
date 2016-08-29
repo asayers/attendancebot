@@ -21,10 +21,14 @@ module Attendance.TimeSheet
     , lateComers
     , allUsers
     , goodRunLength
+
+      -- * Debugging
+    , prettyPrintTimesheet
     ) where
 
 import Control.Lens
 import Data.AffineSpace
+import Data.Function
 import qualified Data.HashMap.Strict as HMS
 import Data.Hashable
 import Data.List
@@ -182,6 +186,42 @@ goodRunLength ts start =
     in length $ takeWhile isGood $ map (start .-^) [0..]
 
 -------------------------------------------------------------------------------
+-- For debugging
 
--- mapKeys :: (Eq k2, Hashable k2) => (k1 -> k2) -> HMS.HashMap k1 v -> HMS.HashMap k2 v
--- mapKeys f = HMS.fromList . map (\(k,v) -> (f k,v)) . HMS.toList
+prettyPrintTimesheet :: TimeSheet -> UTCTime -> (UserId -> T.Text) -> T.Text
+prettyPrintTimesheet ts curTime getUsername = T.unlines $
+    [ "Deadline: " <> T.pack (show (ts ^. tsDeadline))
+    , "Current time: " <> T.pack (show (utcToLocalTimeTZ (ts ^. tsTimeZone) (fromThyme curTime)))
+    ] ++ concatMap ppCheckIns days
+    ++ ppHolidays
+  where
+    days = take 10 $ sort $ nub $ map snd $ HMS.keys $ ts ^. tsCheckIns
+    ppCheckIns d =
+        ("Check-ins for " <> tshow d <> ":") :
+        [ ppCheckIn uid day time
+        | ((uid, day), time) <- sortBy (compare `on` snd) $ HMS.toList (ts ^. tsCheckIns)
+        , day == d
+        ]
+    ppCheckIn uid day time = mconcat
+        [ "  " <> getUsername uid <> " at "
+        , tshow time
+        , " (" <> ppTiming (lookupTiming ts uid day) <> ")"
+        ]
+    -- TODO: only show recent
+    ppHolidays =
+        "Holidays: " :
+        [ ppHoliday uid hol
+        | (uid, hols) <- HMS.toList $ ts ^. tsHolidays
+        , hol <- hols
+        ]
+    ppHoliday uid hol = "  " <> getUsername uid <> case hol of
+        OngoingHoliday start -> " from " <> tshow start <> " to present"
+        CompletedHoliday start end -> " from " <> tshow start <> " to " <> tshow end
+    ppTiming = \case
+        OnTime _ -> "on time"
+        Late _ -> "late"
+        Absent -> "absent"
+        OnHoliday -> "on holiday"
+
+    tshow :: Show a => a -> T.Text
+    tshow = T.pack . show
