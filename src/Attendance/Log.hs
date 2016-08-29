@@ -32,15 +32,16 @@ newLogHandle :: (ev -> st -> st) -> Prism' Text ev -> st -> FilePath -> IO (LogH
 newLogHandle updateState serialiseEvent initialState logPath = do
     ensureExists logPath
     let loggedEvents = lined . T.packed . pre serialiseEvent . _Just
-    curState <- foldrOf loggedEvents updateState initialState <$> readFile logPath
+    curState <- foldlOf' loggedEvents (flip updateState) initialState <$> readFile logPath
     let !h = Handle'{..}
     LogHandle <$> newIORef h
 
 -- TODO: Escape newlines
-logEvent :: LogHandle ev st -> ev -> IO ()
+logEvent :: Show ev => LogHandle ev st -> ev -> IO ()
 logEvent (LogHandle h) event = do
     h'@Handle'{..} <- readIORef h
     T.appendFile logPath (review serialiseEvent event <> "\n")
+    putStrLn $ show event
     let curState' = updateState event curState
     writeIORef h $ h'{curState = curState'}
 
