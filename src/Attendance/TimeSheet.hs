@@ -47,7 +47,10 @@ data TimeSheet = TimeSheet
     }
 
 -- | A closed or right-open interval over days. Bounds are inclusive.
-data Holiday = CompletedHoliday Day Day | OngoingHoliday Day deriving (Eq, Show)
+data Holiday
+    = CompletedHoliday Day Day
+    | OngoingHoliday Day
+    deriving (Eq, Show)
 
 -- TODO: Remove once liyang uploads the next version of thyme
 instance Hashable Day
@@ -70,7 +73,7 @@ updateTimeSheet entry ts = case entry of
         in over (tsHolidays . at uid . non []) (startHoliday (day .+^ 1)) ts
     MarkActive uid time ->
         let LocalTime day _ = toLocalTime time
-        in over (tsHolidays . at uid . non []) (endHoliday day) ts
+        in over (tsHolidays . at uid . non []) (endHoliday (day .-^ 1)) ts
   where
     toLocalTime = toThyme . utcToLocalTimeTZ (ts ^. tsTimeZone) . fromThyme
 
@@ -162,9 +165,13 @@ posixTime = prism' pp parse
 --     return $ mapKeys fst $ HMS.filterWithKey (\(_,day) _ -> day == today) timeSheet
 
 lateComers :: TimeSheet -> Day -> [UserId]
-lateComers ts day =
-    let late uid = case lookupTiming ts uid day of OnTime _ -> False; _ -> True
-    in filter late (allUsers ts)
+lateComers ts day = filter late (allUsers ts)
+  where
+    late uid = case lookupTiming ts uid day of
+        OnTime _ -> False
+        Late _ -> True
+        Absent -> True
+        OnHoliday -> False
 
 allUsers :: TimeSheet -> [UserId]
 allUsers = nub . map fst . HMS.keys . view tsCheckIns
