@@ -8,6 +8,7 @@ module Main where
 
 import Attendance.Monad
 import Attendance.Report
+import Attendance.Schedule
 import Control.Lens
 import Control.Monad.Except
 import Data.Maybe
@@ -17,7 +18,6 @@ import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
 import Data.Time.Zones
 import Data.Time.Zones.All
-import System.Cron.Schedule
 import System.Environment
 import Web.Slack hiding (lines)
 
@@ -29,7 +29,7 @@ main = do
     logPath <- getCheckinLog
     withAttnH slackConfig logPath blacklist timezone deadline $ \h -> do
         -- start cron thread
-        void $ execSchedule $ schedule h
+        runJobs (runAttendance h . snd) scheduledJobs
         -- run main loop
         runAttendance h $ forever (getNextEvent >>= handleEvent)
 
@@ -77,15 +77,14 @@ channel_announce :: ChannelId
 channel_announce = Id ""
 
 -------------------------------------------------------------------------------
--- Scheduled operations
 
-schedule :: AttnH -> Schedule ()
-schedule h = do
-    addJob' remindMissing     "45 23 * * 0-4"  -- 8:45 mon-fri
-    addJob' sendDailySummary  "55 23 * * 0-4"  -- 8:55 mon-fri
-    addJob' sendWeeklySummary "31 3 * * 5"     -- midday on friday
-  where
-    addJob' job cronSpec = addJob (runAttendance h job) cronSpec
+scheduledJobs :: [CronJob (T.Text, Attendance ())]
+scheduledJobs =
+    [ mkJob "45 23 * * 0-4" ("remind missing"      , remindMissing      )  -- 8:45 mon-fri
+    , mkJob "55 23 * * 0-4" ("send daily summary"  , sendDailySummary   )  -- 8:55 mon-fri
+    , mkJob "31 3 * * 5"    ("send weekly summary" , sendWeeklySummary  )  -- midday on friday
+    , mkJob "00 20 * * 0-4" ("download spreadsheet", downloadSpreadsheet)  -- 5:00 mon-fri
+    ]
 
 sendDailySummary :: Attendance ()
 sendDailySummary = sendMessage channel_announce =<< dailySummary

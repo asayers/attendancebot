@@ -25,6 +25,7 @@ module Attendance.Monad
     ) where
 
 import Attendance.Log
+import Attendance.Schedule
 import Attendance.TimeSheet
 import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
 import qualified Attendance.UserTracker as UT
