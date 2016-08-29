@@ -40,7 +40,6 @@ executable attendancebot
       , gogol >= 0.1
       , gogol-sheets >= 0.1
       , gogol-storage >= 0.1
-      , temporary >= 1.2
       , hashable >= 1.2
       , lens >= 4.13
       , mtl >= 2.2
@@ -48,6 +47,7 @@ executable attendancebot
       , process >= 1.2.3
       , resourcet >= 1.1
       , slack-api >= 0.9
+      , temporary >= 1.2
       , text >= 1.2
       , thyme >= 0.3.5
       , time >= 1.5

@@ -23,8 +23,9 @@ import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
 import Graphics.Rendering.Chart.Backend.Cairo
 import Graphics.Rendering.Chart.Easy
+import System.FilePath
+import System.IO.Temp
 import System.Locale
-import System.Process
 import Web.Slack hiding (lines)
 
 missingReport :: Attendance [(UserId, T.Text)]
@@ -90,12 +91,14 @@ summaryRow uid = do
 -- Weekly summary chart
 
 renderWeeklySummaryChart :: Attendance T.Text
-renderWeeklySummaryChart = do
-    timeSheet <- getTimeSheet
-    timestamp <- formatTime defaultTimeLocale "%Y-%m-%d_%H-%M-%S" <$> liftIO getCurrentTime
-    liftIO $ makeChart timeSheet "out.png"
-    liftIO $ callCommand $ "scp out.png alex@www.asayers.org:/var/www/asayers.org/html/attendance/" ++ timestamp ++ ".png"
-    return $ T.pack $ "http://www.asayers.org/attendance/" ++ timestamp ++ ".png"
+renderWeeklySummaryChart =
+    withSystemTempDirectory "weekly-attendance-graph" $ \outdir -> do
+        timestamp <- formatTime defaultTimeLocale "%Y-%m-%d_%H-%M-%S" <$> liftIO getCurrentTime
+        let outpath = outdir </> "out.png"
+        let name = "weekly-attendance-graphs/" <> T.pack timestamp <> ".png"
+        timeSheet <- getTimeSheet
+        liftIO $ makeChart timeSheet outpath
+        uploadFile outpath name
 
 makeChart :: TimeSheet -> FilePath -> IO ()
 makeChart ts outpath = do
