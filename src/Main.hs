@@ -9,6 +9,7 @@ module Main where
 import Attendance.Monad
 import Attendance.Report
 import Attendance.Schedule
+import Attendance.Spreadsheet
 import Control.Lens
 import Control.Monad.Except
 import Data.Maybe
@@ -31,7 +32,9 @@ main = do
         -- start cron thread
         runJobs (runAttendance h . snd) scheduledJobs
         -- run main loop
-        runAttendance h $ forever (getNextEvent >>= handleEvent)
+        runAttendance h $ do
+            updateFromSpreadsheet =<< getAttendanceData
+            forever (getNextEvent >>= handleEvent)
 
 handleEvent :: Event -> Attendance ()
 handleEvent ev = case ev of
@@ -44,6 +47,7 @@ handleEvent ev = case ev of
             "inactive" -> markInactive uid ts
             "debug" -> dumpDebug uid scheduledJobs
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
+            "spreadsheet" -> sendIM uid =<< ppSpreadsheet =<< getAttendanceData
             _ -> checkin uid ts
     ImCreated _ im -> trackUser im
     _ -> liftIO $ print ev
