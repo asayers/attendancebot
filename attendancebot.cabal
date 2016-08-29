@@ -25,23 +25,32 @@ executable attendancebot
       , Attendance.TimeSheet
       , Attendance.UserTracker
   build-depends:
-        base >= 4.7 && < 5
+        aeson >= 0.11.2
+      , attoparsec >= 0.13
+      , base >= 4.7 && < 5
+      , transformers-base >= 0.4.4
       , Chart >= 1.6
       , Chart-cairo >= 1.6
       , containers >= 0.5
       , cron >= 0.4.1
       , data-default-class >= 0.0.1
       , directory >= 1.2
+      , exceptions >= 0.8.2
       , filepath >= 1.4
+      , gogol >= 0.1
+      , gogol-sheets >= 0.1
+      , gogol-storage >= 0.1
+      , temporary >= 1.2
       , hashable >= 1.2
       , lens >= 4.13
       , mtl >= 2.2
-      , tz >= 0.1.1
       , old-locale
       , process >= 1.2.3
+      , resourcet >= 1.1
       , slack-api >= 0.9
       , text >= 1.2
       , thyme >= 0.3.5
       , time >= 1.5
+      , tz >= 0.1.1
       , unordered-containers >= 0.2.7
       , vector-space >= 0.10

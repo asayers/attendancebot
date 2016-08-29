@@ -4,10 +4,14 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Attendance.Monad
     ( AttnH, withAttnH
     , Attendance, runAttendance
+    , Scopes
 
       -- * Modifying
     , checkin
@@ -20,6 +24,9 @@ module Attendance.Monad
     , getTrackedUsers
     , channelIsIM
 
+      -- * Google
+    , uploadFile
+
       -- * Slack
     , sendIM
     , sendRichIM
@@ -31,35 +38,58 @@ import Attendance.Schedule
 import Attendance.TimeSheet
 import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
 import qualified Attendance.UserTracker as UT
+import Control.Lens
+import Control.Monad.Base
+import Control.Monad.Catch
 import Control.Monad.Reader
+import Control.Monad.Trans.Resource
+import Data.List
+import Data.Maybe
+import Data.Monoid
 import qualified Data.Text as T
 import Data.Thyme
 import Data.Time.Zones
-import Web.Slack.Handle (SlackHandle, withSlackHandle, getSession)
-import Web.Slack.Monad hiding (getSession)
+import qualified Network.Google as G
+import qualified Network.Google.Storage as G
+import System.IO
+import qualified Web.Slack.Handle as H
+import Web.Slack.Monad
 
-newtype Attendance a = Attendance (ReaderT AttnH IO a)
-    deriving (Functor, Applicative, Monad, MonadIO)
+newtype Attendance a = Attendance (ReaderT AttnH (ResourceT IO) a)
+    deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch
+             , MonadResource, MonadBase IO, MonadMask)
 
 instance MonadSlack Attendance where
     askSlackHandle = Attendance $ slackH <$> ask
 
+instance G.MonadGoogle Scopes Attendance where
+    liftGoogle (G.Google x) =
+        liftResourceT . runReaderT x . googleEnv =<< getAttnH
+
 data AttnH = AttnH
-    { slackH :: SlackHandle
+    { slackH :: H.SlackHandle
     , trackerH :: TrackerHandle
     , stateH :: LogHandle TimeSheetUpdate TimeSheet
+    , googleEnv :: G.Env Scopes
     }
 
+type Scopes = '[ "https://www.googleapis.com/auth/devstorage.read_write"
+               , "https://www.googleapis.com/auth/spreadsheets.readonly"
+               ]
+
 withAttnH :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> (AttnH -> IO a) -> IO a
-withAttnH conf logPath blacklist tz deadline fn = withSlackHandle conf $ \slackH -> do
+withAttnH conf logPath blacklist tz deadline fn = do
     let timeSheet = newTimeSheet tz deadline
     stateH <- newLogHandle updateTimeSheet timeSheetUpdate timeSheet logPath
-    trackerH <- newTrackerHandle (getSession slackH) blacklist
-    fn AttnH{..}
+    logger <- G.newLogger G.Debug stdout
+    googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
+    H.withSlackHandle conf $ \slackH -> do
+        trackerH <- newTrackerHandle (H.getSession slackH) blacklist
+        fn AttnH{..}
 
 runAttendance :: AttnH -> Attendance a -> IO a
-runAttendance attnH (Attendance ma) = do
-    runReaderT ma attnH
+runAttendance attnH (Attendance ma) =
+    runResourceT $ runReaderT ma attnH
 
 getAttnH :: Attendance AttnH
 getAttnH = Attendance ask
@@ -99,6 +129,16 @@ getTrackedUsers = getAttnH >>= \h -> liftIO $ UT.getTrackedUsers (trackerH h)
 
 channelIsIM :: ChannelId -> Attendance Bool
 channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
+
+-------------------------------------------------------------------------------
+-- Google
+
+uploadFile :: G.MonadGoogle Scopes m => FilePath -> T.Text -> m T.Text
+uploadFile filepath name = do
+    let bucket = "attendancebot-141720.appspot.com"
+    fileBody <- G.sourceBody filepath
+    obj <- G.upload (G.objectsInsert bucket G.object' & (G.oiName .~ Just name) . (G.oiPredefinedACL .~ Just G.OIPAPublicRead)) fileBody
+    return $ fromMaybe (error "uploadFile: no link returned") $ obj ^. G.objMediaLink
 
 -------------------------------------------------------------------------------
 -- Slack helpers
