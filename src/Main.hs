@@ -104,6 +104,9 @@ sendWeeklySummary = do
     ret <- sendRichMessage channel_announce "" [attachment]
     either (liftIO . putStrLn . T.unpack) return ret
 
+downloadSpreadsheet :: Attendance ()
+downloadSpreadsheet = updateFromSpreadsheet =<< getAttendanceData
+
 -------------------------------------------------------------------------------
 -- Helpers
 

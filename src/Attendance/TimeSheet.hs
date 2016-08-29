@@ -34,6 +34,7 @@ import Data.Hashable
 import Data.List
 import Data.Monoid
 import qualified Data.Text as T
+import qualified Data.Text.Read as T
 import Data.Thyme
 import Data.Thyme.Time
 import Data.Time.Zones
@@ -48,12 +49,13 @@ data TimeSheet = TimeSheet
     , _tsHolidays :: HMS.HashMap UserId [Holiday]
     , _tsTimeZone :: TZ
     , _tsDeadline :: TimeOfDay  -- ^ When should users have checked in by?
-    }
+    } deriving Show
 
 -- | A closed or right-open interval over days. Bounds are inclusive.
 data Holiday
     = CompletedHoliday Day Day
     | OngoingHoliday Day
+    | OneDayHoliday Day
     deriving (Eq, Show)
 
 -- TODO: Remove once liyang uploads the next version of thyme
@@ -78,6 +80,8 @@ updateTimeSheet entry ts = case entry of
     MarkActive uid time ->
         let LocalTime day _ = toLocalTime time
         in over (tsHolidays . at uid . non []) (endHoliday (day .-^ 1)) ts
+    MarkHoliday uid day _amt ->
+        over (tsHolidays . at uid . non []) (++ [OneDayHoliday day]) ts
   where
     toLocalTime = toThyme . utcToLocalTimeTZ (ts ^. tsTimeZone) . fromThyme
 
@@ -119,19 +123,26 @@ isInHoliday :: Day -> Holiday -> Bool
 isInHoliday day hol = case hol of
     OngoingHoliday   start     -> day >= start
     CompletedHoliday start end -> day >= start && day <= end
+    OneDayHoliday    d         -> day == d
 
 -------------------------------------------------------------------------------
+-- Serialisable state updates
 
 data TimeSheetUpdate
     = CheckIn UserId UTCTime
     | MarkInactive UserId UTCTime -- ^ The user is inactive as of the specified time
     | MarkActive UserId UTCTime -- ^ The user is active as of the specified time
+    | MarkHoliday UserId Day Double -- ^ The user is on holiday for the specified day
 
 instance Show TimeSheetUpdate where
     show entry = case entry of
         CheckIn  uid ts -> showUidTs "Check-in" uid ts
         MarkInactive uid ts -> showUidTs "Inactive" uid ts
         MarkActive   uid ts -> showUidTs "Active" uid ts
+        MarkHoliday (Id uid) day amt ->
+            "Holiday:" <> T.unpack uid <>
+            " on " <> show day <>
+            "(" <> show amt <> ")"
       where
         showUidTs name (Id uid) ts = unwords
             [ name <> ":", T.unpack uid, "at"
@@ -145,10 +156,14 @@ timeSheetUpdate = prism' pp parse
         CheckIn      (Id uid) ts -> ["checkin" , review posixTime ts, uid]
         MarkActive   (Id uid) ts -> ["active"  , review posixTime ts, uid]
         MarkInactive (Id uid) ts -> ["inactive", review posixTime ts, uid]
+        MarkHoliday  (Id uid) day amt ->
+            ["holiday" , review dayToText day, uid, review doubleToText amt]
     parse txt = case T.splitOn "\t" txt of
-        [name,ts,uid] | name == "checkin"  -> CheckIn      (Id uid) <$> preview posixTime ts
-        [name,ts,uid] | name == "active"   -> MarkActive   (Id uid) <$> preview posixTime ts
-        [name,ts,uid] | name == "inactive" -> MarkInactive (Id uid) <$> preview posixTime ts
+        [cmd,ts,uid] | cmd == "checkin"  -> CheckIn      (Id uid) <$> preview posixTime ts
+        [cmd,ts,uid] | cmd == "active"   -> MarkActive   (Id uid) <$> preview posixTime ts
+        [cmd,ts,uid] | cmd == "inactive" -> MarkInactive (Id uid) <$> preview posixTime ts
+        [cmd,day,uid,amt] | cmd == "holiday" ->
+            MarkHoliday  (Id uid) <$> preview dayToText day <*> preview doubleToText amt
         _ -> Nothing
 
 posixTime :: Prism' T.Text UTCTime
@@ -156,6 +171,18 @@ posixTime = prism' pp parse
   where
     pp = T.pack . formatTime defaultTimeLocale "%s"
     parse = parseTime defaultTimeLocale "%s" . T.unpack
+
+dayToText :: Prism' T.Text Day
+dayToText = prism' pp parse
+  where
+    pp = T.pack . formatTime defaultTimeLocale "%Y-%m-%d"
+    parse = parseTime defaultTimeLocale "%Y-%m-%d" . T.unpack
+
+doubleToText :: Prism' T.Text Double
+doubleToText = prism' pp parse
+  where
+    pp = T.pack . show
+    parse = either (const Nothing) (Just . fst) . T.double
 
 -------------------------------------------------------------------------------
 
@@ -217,6 +244,7 @@ prettyPrintTimesheet ts curTime getUsername = T.unlines $
     ppHoliday uid hol = "  " <> getUsername uid <> case hol of
         OngoingHoliday start -> " from " <> tshow start <> " to present"
         CompletedHoliday start end -> " from " <> tshow start <> " to " <> tshow end
+        OneDayHoliday day -> " on " <> tshow day
     ppTiming = \case
         OnTime _ -> "on time"
         Late _ -> "late"

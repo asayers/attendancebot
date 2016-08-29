@@ -17,6 +17,7 @@ module Attendance.Monad
     , checkin
     , markInactive
     , markActive
+    , markHoliday
     , trackUser
 
       -- * Querying
@@ -112,6 +113,11 @@ markActive :: UserId -> UTCTime -> Attendance ()
 markActive uid ts = do
     modifyTimeSheet $ MarkActive uid ts
     sendIM uid "Welcome back! You have been marked as active from today onwards."
+
+markHoliday :: UserId -> Day -> Double -> Attendance ()
+markHoliday uid day amt = do
+    modifyTimeSheet $ MarkHoliday uid day amt
+    sendIM uid $ "Looks like you're taking the day off on " <> T.pack (show day) <> ". Have a nice time!"
 
 modifyTimeSheet :: TimeSheetUpdate -> Attendance ()
 modifyTimeSheet ev = liftIO . flip logEvent ev . stateH =<< getAttnH
