@@ -22,6 +22,8 @@ module Attendance.Monad
 
       -- * Slack
     , sendIM
+    , sendRichIM
+    , getUsername
     ) where
 
 import Attendance.Log
@@ -107,3 +109,20 @@ sendIM uid msg = do
     liftIO (UT.lookupIMChannel h uid) >>= \case
         Just cid -> sendMessage cid msg
         Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid
+
+sendRichIM :: UserId -> T.Text -> [Attachment] -> Attendance ()
+sendRichIM uid msg attnts = do
+    h <- trackerH <$> getAttnH
+    liftIO (UT.lookupIMChannel h uid) >>= \case
+        Just cid -> do
+            ret <- sendRichMessage cid msg attnts
+            either (liftIO . putStrLn . T.unpack) return ret
+        Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid
+
+-- | The user must already exist when the connection to slack is
+-- established. TODO: get info from UserTracker
+getUsername :: MonadSlack m => UserId -> m T.Text
+getUsername uid =
+    maybe "unknown" _userName .
+        find (\user -> _userId user == uid) .
+            _slackUsers <$> getSession
