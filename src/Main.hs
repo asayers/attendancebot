@@ -32,7 +32,7 @@ main = do
     slackConfig <- getSlackConfig
     logPath <- getCheckinLog
     putStrLn $ "Writing data to " ++ logPath
-    withAttnH slackConfig logPath blacklist timezone deadline $ \h -> runAttendance h $ do
+    runAttendance slackConfig logPath blacklist timezone deadline $ do
         liftIO $ putStrLn "Established slack connection"
         -- start cron thread
         liftIO $ putStrLn "Starting job scheduler..."

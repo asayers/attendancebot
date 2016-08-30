@@ -10,8 +10,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Attendance.Monad
-    ( AttnH, withAttnH
-    , Attendance, runAttendance
+    ( Attendance, runAttendance
     , Scopes
 
       -- * Modifying
@@ -86,8 +85,8 @@ type Scopes = '[ "https://www.googleapis.com/auth/devstorage.read_write"
                , "https://www.googleapis.com/auth/spreadsheets.readonly"
                ]
 
-withAttnH :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> (AttnH -> IO a) -> IO a
-withAttnH conf dbPath blacklist tz deadline fn = do
+runAttendance :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> Attendance a -> IO a
+runAttendance conf dbPath blacklist tz deadline (Attendance x) = do
     let timeSheet = newTimeSheet tz deadline
     putStrLn "Restoring state..."
     dbH <- newDBHandle updateTimeSheet timeSheetUpdate timeSheet dbPath
@@ -95,11 +94,7 @@ withAttnH conf dbPath blacklist tz deadline fn = do
     googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
     H.withSlackHandle conf $ \slackH -> do
         trackerH <- newTrackerHandle (H.getSession slackH) blacklist
-        fn AttnH{..}
-
-runAttendance :: AttnH -> Attendance a -> IO a
-runAttendance attnH (Attendance ma) =
-    runResourceT $ runReaderT ma attnH
+        runResourceT $ runReaderT x AttnH{..}
 
 getAttnH :: Attendance AttnH
 getAttnH = Attendance ask
