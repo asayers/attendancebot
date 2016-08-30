@@ -37,7 +37,6 @@ module Attendance.Monad
     ) where
 
 import Attendance.Log
-import Attendance.Schedule
 import Attendance.TimeSheet
 import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
 import qualified Attendance.UserTracker as UT
@@ -55,6 +54,7 @@ import Data.Thyme
 import Data.Time.Zones
 import qualified Network.Google as G
 import qualified Network.Google.Storage as G
+import System.Cron
 import System.IO
 import qualified Web.Slack.Handle as H
 import Web.Slack.Monad
@@ -132,7 +132,7 @@ modifyTimeSheet ev = liftIO . flip logEvent ev . stateH =<< getAttnH
 getTimeSheet :: Attendance TimeSheet
 getTimeSheet = liftIO . getCurState . stateH =<< getAttnH
 
-dumpDebug :: UserId -> [CronJob (T.Text, a)] -> Attendance ()
+dumpDebug :: UserId -> [Job m] -> Attendance ()
 dumpDebug uid scheduledJobs = do
     ts <- getTimeSheet
     curTime <- liftIO $ getCurrentTime
@@ -142,9 +142,15 @@ dumpDebug uid scheduledJobs = do
     sendIM uid $ T.unlines
         [ "```"
         , prettyPrintTimesheet ts curTime getUsername'
-        , prettyPrintJobs fst scheduledJobs
+        , prettyPrintJobs scheduledJobs
         , "```"
         ]
+
+-- FIXME
+prettyPrintJobs :: [Job m] -> T.Text
+prettyPrintJobs = T.unlines . ("Scheduled jobs:":) . map ppJob
+  where
+    ppJob (Job sched _) = "  " <> T.pack (show sched) <> ": <job>"
 
 -------------------------------------------------------------------------------
 -- UserTracker

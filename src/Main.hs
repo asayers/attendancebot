@@ -8,9 +8,9 @@ module Main where
 
 import Attendance.Monad
 import Attendance.Report
-import Attendance.Schedule
 import Attendance.Spreadsheet
 import Control.Lens
+import Control.Monad.Catch
 import Control.Monad.Except
 import Data.Maybe
 import qualified Data.Text as T
@@ -19,6 +19,7 @@ import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
 import Data.Time.Zones
 import Data.Time.Zones.All
+import System.Cron
 import System.Environment
 import Web.Slack hiding (lines)
 
@@ -28,13 +29,12 @@ main :: IO ()
 main = do
     slackConfig <- getSlackConfig
     logPath <- getCheckinLog
-    withAttnH slackConfig logPath blacklist timezone deadline $ \h -> do
+    withAttnH slackConfig logPath blacklist timezone deadline $ \h -> runAttendance h $ do
         -- start cron thread
-        runJobs (runAttendance h . snd) scheduledJobs
+        either throwM runJobs scheduledJobs
         -- run main loop
-        runAttendance h $ do
-            updateFromSpreadsheet =<< getAttendanceData
-            forever (getNextEvent >>= handleEvent)
+        updateFromSpreadsheet =<< getAttendanceData
+        forever (getNextEvent >>= handleEvent)
 
 handleEvent :: Event -> Attendance ()
 handleEvent ev = case ev of
@@ -45,7 +45,7 @@ handleEvent ev = case ev of
         when (isIM && uid /= user_me) $ case msg of
             "active" -> markActive uid ts
             "inactive" -> markInactive uid ts
-            "debug" -> dumpDebug uid scheduledJobs
+            "debug" -> dumpDebug uid =<< either throwM return scheduledJobs
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
             "spreadsheet" -> sendIM uid =<< ppSpreadsheet =<< getAttendanceData
             _ -> checkin uid ts
@@ -84,12 +84,12 @@ channel_announce = Id ""
 
 -------------------------------------------------------------------------------
 
-scheduledJobs :: [CronJob (T.Text, Attendance ())]
-scheduledJobs =
-    [ mkJob "45 23 * * 0-4" ("remind missing"      , remindMissing      )  -- 8:45 mon-fri
-    , mkJob "55 23 * * 0-4" ("send daily summary"  , sendDailySummary   )  -- 8:55 mon-fri
-    , mkJob "31 3 * * 5"    ("send weekly summary" , sendWeeklySummary  )  -- midday on friday
-    , mkJob "00 20 * * 0-4" ("download spreadsheet", downloadSpreadsheet)  -- 5:00 mon-fri
+scheduledJobs :: Either ScheduleError [Job Attendance]
+scheduledJobs = sequence
+    [ mkJob "45 23 * * 0-4" remindMissing         -- 8:45 mon-fri
+    , mkJob "55 23 * * 0-4" sendDailySummary      -- 8:55 mon-fri
+    , mkJob "31 3 * * 5"    sendWeeklySummary     -- midday on friday
+    , mkJob "00 20 * * 0-4" downloadSpreadsheet   -- 5:00 mon-fri
     ]
 
 sendDailySummary :: Attendance ()

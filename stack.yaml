@@ -40,6 +40,9 @@ packages:
 - location:
     git: https://github.com/mpickering/slack-api
     commit: "1179108"
+- location:
+    git: https://github.com/asayers/cron
+    commit: "4c32efa"
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
