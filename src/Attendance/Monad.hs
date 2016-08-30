@@ -7,6 +7,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Attendance.Monad
     ( AttnH, withAttnH
@@ -44,6 +45,7 @@ import Control.Lens
 import Control.Monad.Base
 import Control.Monad.Catch
 import Control.Monad.Reader
+import Control.Monad.Trans.Control
 import Control.Monad.Trans.Resource
 import Data.List
 import Data.Maybe
@@ -60,6 +62,11 @@ import Web.Slack.Monad
 newtype Attendance a = Attendance (ReaderT AttnH (ResourceT IO) a)
     deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch
              , MonadResource, MonadBase IO, MonadMask)
+
+instance MonadBaseControl IO Attendance where
+    type StM Attendance a = a
+    liftBaseWith f = Attendance $ liftBaseWith $ \run -> f (\(Attendance x) -> run x)
+    restoreM = Attendance . restoreM
 
 instance MonadSlack Attendance where
     askSlackHandle = Attendance $ slackH <$> ask
