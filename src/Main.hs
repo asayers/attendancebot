@@ -9,9 +9,11 @@ module Main where
 import Attendance.Monad
 import Attendance.Report
 import Attendance.Spreadsheet
+import Control.Concurrent
 import Control.Lens
 import Control.Monad.Catch
 import Control.Monad.Except
+import Control.Monad.Trans.Control
 import Data.Maybe
 import qualified Data.Text as T
 import Data.Thyme
@@ -34,7 +36,7 @@ main = do
         liftIO $ putStrLn "Established slack connection"
         -- start cron thread
         liftIO $ putStrLn "Starting job scheduler..."
-        either throwM runJobs scheduledJobs
+        either throwM (void . liftBaseDiscard forkIO . runJobs) scheduledJobs
         -- run main loop
         liftIO $ putStrLn "Fetching spreadsheet data..."
         updateFromSpreadsheet =<< getAttendanceData
