@@ -38,17 +38,23 @@ missingReport = do
 
 dailySummary :: Attendance T.Text
 dailySummary = do
-    missing <- fmap sort . mapM getUserName =<< lateComers <$> getTimeSheet <*> liftIO today
-    streak <- goodRunLength <$> getTimeSheet <*> liftIO yesterday
-    return $ case missing of
-        [] -> "Everyone got in on time! Current streak: " <>
-              T.pack (show $ streak + 1) <> pl (streak + 1) " day." " days."
-        _ | streak > 0 ->
-                 "C-c-c-combo breaker! " <> listEN missing <> " still " <>
-                 pl (length missing) "hasn't" "haven't" <> " checked in. " <>
-                 "This ends a streak of " <> T.pack (show streak) <>
-                 pl streak " day." " days."
-        _ -> listEN missing <> " still " <> pl (length missing) "hasn't" "haven't" <> " checked in."
+    ts <- getTimeSheet
+    missing   <- fmap sort . mapM getUserName =<< lateComers    ts <$> liftIO today
+    onHoliday <- fmap sort . mapM getUserName =<< holidayMakers ts <$> liftIO today
+    streak <- goodRunLength ts <$> liftIO yesterday
+    let missingTxt = case missing of
+          [] -> "Everyone got in on time! Current streak: " <>
+                T.pack (show $ streak + 1) <> pl (streak + 1) " day." " days."
+          _ | streak > 0 ->
+                   "C-c-c-combo breaker! " <> listEN missing <> " still " <>
+                   pl (length missing) "hasn't" "haven't" <> " checked in. " <>
+                   "This ends a streak of " <> T.pack (show streak) <>
+                   pl streak " day." " days."
+          _ -> listEN missing <> " still " <> pl (length missing) "hasn't" "haven't" <> " checked in."
+    let holidayTxt = case onHoliday of
+          [] -> ""
+          _ -> " " <> listEN onHoliday <> " are on holiday today."
+    return $ missingTxt <> holidayTxt
 
 -------------------------------------------------------------------------------
 -- Weekly summary

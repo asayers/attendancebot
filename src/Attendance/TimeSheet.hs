@@ -19,6 +19,7 @@ module Attendance.TimeSheet
     , lookupTiming
 
     , lateComers
+    , holidayMakers
     , allUsers
     , goodRunLength
 
@@ -203,6 +204,10 @@ lateComers ts day = filter late (allUsers ts)
         Late _ -> True
         Absent -> True
         OnHoliday -> False
+
+holidayMakers :: TimeSheet -> Day -> [UserId]
+holidayMakers ts day =
+    [uid | uid <- allUsers ts, OnHoliday <- [lookupTiming ts uid day] ]
 
 allUsers :: TimeSheet -> [UserId]
 allUsers = nub . map fst . HMS.keys . view tsCheckIns
