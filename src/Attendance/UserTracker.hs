@@ -20,35 +20,31 @@ import Data.Monoid
 import qualified Data.Text.IO as T
 import Web.Slack hiding (lines)
 
-newtype TrackerHandle = TrackerHandle (IORef Handle')
-data Handle' = Handle'
-    { _trackedUsers :: HMS.HashMap UserId ChannelId
-    , _blacklist :: [UserId]
+data TrackerHandle = TrackerHandle
+    { trackedUsers :: IORef (HMS.HashMap UserId ChannelId)
+    , blacklist :: [UserId]
     }
 
-makeLenses ''Handle'
-
 newTrackerHandle :: SlackSession -> [UserId] -> IO TrackerHandle
-newTrackerHandle session _blacklist = do
-    let _trackedUsers = HMS.empty
-    h <- TrackerHandle <$> newIORef Handle'{..}
+newTrackerHandle session blacklist = do
+    trackedUsers <- newIORef HMS.empty
+    let h = TrackerHandle{..}
     traverseOf_ (slackIms . traverse) (trackUser h) session
     return h
 
 trackUser :: TrackerHandle -> IM -> IO ()
-trackUser (TrackerHandle h) im = do
+trackUser TrackerHandle{..} im = do
     let uid = im ^. imUser
     let cid = im ^. imId . to imToChannel
-    shouldIgnore <- elem uid . view blacklist <$> readIORef h
-    unless shouldIgnore $ do
+    unless (elem uid blacklist) $ do
         T.putStrLn $ "Tracking user " <> _getId uid
-        modifyIORef h $ set (trackedUsers . at uid) (Just cid)
+        modifyIORef trackedUsers $ HMS.insert uid cid
 
 getTrackedUsers :: TrackerHandle -> IO [UserId]
-getTrackedUsers (TrackerHandle h) = HMS.keys . view trackedUsers <$> readIORef h
+getTrackedUsers TrackerHandle{..} = HMS.keys <$> readIORef trackedUsers
 
 lookupIMChannel :: TrackerHandle -> UserId -> IO (Maybe ChannelId)
-lookupIMChannel (TrackerHandle h) uid = preview (trackedUsers . ix uid) <$> readIORef h
+lookupIMChannel TrackerHandle{..} uid = HMS.lookup uid <$> readIORef trackedUsers
 
 channelIsIM :: TrackerHandle -> ChannelId -> IO Bool
-channelIsIM (TrackerHandle h) cid = elemOf (trackedUsers . traverse) cid <$> readIORef h
+channelIsIM TrackerHandle{..} cid = elem cid <$> readIORef trackedUsers
