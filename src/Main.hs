@@ -29,11 +29,16 @@ main :: IO ()
 main = do
     slackConfig <- getSlackConfig
     logPath <- getCheckinLog
+    putStrLn $ "Writing data to " ++ logPath
     withAttnH slackConfig logPath blacklist timezone deadline $ \h -> runAttendance h $ do
+        liftIO $ putStrLn "Established slack connection"
         -- start cron thread
+        liftIO $ putStrLn "Starting job scheduler..."
         either throwM runJobs scheduledJobs
         -- run main loop
+        liftIO $ putStrLn "Fetching spreadsheet data..."
         updateFromSpreadsheet =<< getAttendanceData
+        liftIO $ putStrLn "Listening to events..."
         forever (getNextEvent >>= handleEvent)
 
 handleEvent :: Event -> Attendance ()
