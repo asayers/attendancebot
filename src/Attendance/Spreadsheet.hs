@@ -9,8 +9,10 @@ module Attendance.Spreadsheet
 
 import Attendance.Monad
 import Attendance.TimeSheet
+import Control.Exception.Lifted
 import Control.Lens
 import Control.Monad
+import Control.Monad.Trans.Control
 import qualified Data.Aeson as A
 import qualified Data.HashMap.Strict as HMS
 import Data.Maybe
@@ -40,11 +42,16 @@ ppSpreadsheet xs = do
       return $ "  " <> uname <> " on " <> T.pack (show day) <> ": " <> T.pack (show offtime)
     return $ T.unlines $ [ "```" ] ++ rows ++ [ "```" ]
 
-getAttendanceData :: G.MonadGoogle Scopes m => m (HMS.HashMap (UserId, Day) Double)
+getAttendanceData
+    :: (G.MonadGoogle Scopes m, MonadBaseControl IO m)
+    => m (HMS.HashMap (UserId, Day) Double)
 getAttendanceData = do
     let sheetId = ""
-    vr <- G.send (G.spreadsheetsValuesGet sheetId "")
-    return $ HMS.unions $ map processRow $ vr ^. G.vrValues
+    vr'e <- try $ G.send (G.spreadsheetsValuesGet sheetId "")
+    case vr'e of
+        Right vr -> return $ HMS.unions $ map processRow $ vr ^. G.vrValues
+        Left (G.TransportError _) -> return HMS.empty
+        Left _ -> return HMS.empty
 
 processRow :: [A.Value] -> HMS.HashMap (UserId, Day) Double
 processRow vals =
