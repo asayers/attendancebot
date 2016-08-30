@@ -36,7 +36,7 @@ module Attendance.Monad
     , dumpDebug
     ) where
 
-import Attendance.Log
+import Attendance.DB
 import Attendance.TimeSheet
 import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
 import qualified Attendance.UserTracker as UT
@@ -78,7 +78,7 @@ instance G.MonadGoogle Scopes Attendance where
 data AttnH = AttnH
     { slackH :: H.SlackHandle
     , trackerH :: TrackerHandle
-    , stateH :: LogHandle TimeSheetUpdate TimeSheet
+    , dbH :: DBHandle TimeSheetUpdate TimeSheet
     , googleEnv :: G.Env Scopes
     }
 
@@ -87,9 +87,10 @@ type Scopes = '[ "https://www.googleapis.com/auth/devstorage.read_write"
                ]
 
 withAttnH :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> (AttnH -> IO a) -> IO a
-withAttnH conf logPath blacklist tz deadline fn = do
+withAttnH conf dbPath blacklist tz deadline fn = do
     let timeSheet = newTimeSheet tz deadline
-    stateH <- newLogHandle updateTimeSheet timeSheetUpdate timeSheet logPath
+    putStrLn "Restoring state..."
+    dbH <- newDBHandle updateTimeSheet timeSheetUpdate timeSheet dbPath
     logger <- G.newLogger G.Debug stdout
     googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
     H.withSlackHandle conf $ \slackH -> do
@@ -127,10 +128,10 @@ markHoliday uid day amt = do
     sendIM uid $ "Looks like you're taking the day off on " <> T.pack (show day) <> ". Have a nice time!"
 
 modifyTimeSheet :: TimeSheetUpdate -> Attendance ()
-modifyTimeSheet ev = liftIO . flip logEvent ev . stateH =<< getAttnH
+modifyTimeSheet ev = liftIO . flip commitEvent ev . dbH =<< getAttnH
 
 getTimeSheet :: Attendance TimeSheet
-getTimeSheet = liftIO . getCurState . stateH =<< getAttnH
+getTimeSheet = liftIO . getState . dbH =<< getAttnH
 
 dumpDebug :: UserId -> [Job m] -> Attendance ()
 dumpDebug uid scheduledJobs = do

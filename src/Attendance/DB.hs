@@ -3,11 +3,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Attendance.Log
-    ( LogHandle
-    , newLogHandle
-    , logEvent
-    , getCurState
+module Attendance.DB
+    ( DBHandle
+    , newDBHandle
+    , commitEvent
+    , getState
     ) where
 
 import Control.Lens
@@ -20,34 +20,36 @@ import System.Directory
 import System.FilePath
 import System.IO
 
-data LogHandle ev st = LogHandle
+data DBHandle ev st = DBHandle
     { updateState :: ev -> st -> st
     , serialiseEvent :: Prism' Text ev
-    , logHandle :: Handle
+    , fileHandle :: Handle
     , curState :: IORef st
     }
 
-newLogHandle :: (ev -> st -> st) -> Prism' Text ev -> st -> FilePath -> IO (LogHandle ev st)
-newLogHandle updateState serialiseEvent initialState logPath = do
+newDBHandle :: (ev -> st -> st) -> Prism' Text ev -> st -> FilePath -> IO (DBHandle ev st)
+newDBHandle updateState serialiseEvent initialState logPath = do
     putStrLn "Checking log file exists..."
     ensureExists logPath
     putStrLn "Replaying log to restore state..."
+    !fileContents <- readFile logPath
     let loggedEvents = lined . T.packed . pre serialiseEvent . _Just
-    st <- foldlOf' loggedEvents (flip updateState) initialState <$> readFile logPath
+    let !st = foldlOf' loggedEvents (flip updateState) initialState fileContents
     curState <- newIORef st
     putStrLn "Done restoring state"
-    logHandle <- openFile logPath WriteMode
-    return LogHandle{..}
+    fileHandle <- openFile logPath AppendMode
+    hSetBuffering fileHandle LineBuffering
+    return DBHandle{..}
 
 -- TODO: Escape newlines
-logEvent :: Show ev => LogHandle ev st -> ev -> IO ()
-logEvent LogHandle{..} event = do
-    T.hPutStrLn logHandle (review serialiseEvent event)
+commitEvent :: Show ev => DBHandle ev st -> ev -> IO ()
+commitEvent DBHandle{..} event = do
+    T.hPutStrLn fileHandle (review serialiseEvent event)
     putStrLn $ show event
     modifyIORef curState (updateState event)
 
-getCurState :: LogHandle ev st -> IO st
-getCurState = readIORef . curState
+getState :: DBHandle ev st -> IO st
+getState = readIORef . curState
 
 ensureExists :: FilePath -> IO ()
 ensureExists path = do
