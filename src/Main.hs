@@ -57,7 +57,9 @@ handleEvent ev = case ev of
             "spreadsheet" -> sendIM uid =<< ppSpreadsheet =<< getAttendanceData
             _ -> checkin uid ts
     ImCreated _ im -> trackUser im
-    _ -> liftIO $ print ev
+    PresenceChange _ _ -> return ()  -- expected, ignore
+    ReconnectUrl _     -> return ()  -- expected, ignore
+    _ -> liftIO $ print ev           -- anything else is unexpected, log it
 
 -------------------------------------------------------------------------------
 -- Configuration
