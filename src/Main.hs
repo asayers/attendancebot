@@ -82,7 +82,7 @@ timezone :: TZ
 timezone = tzByLabel Asia__Tokyo
 
 deadline :: TimeOfDay
-deadline = TimeOfDay 9 0 (fromSeconds' 0)  -- 9am JST
+deadline = TimeOfDay 8 45 (fromSeconds' 0)  -- 8:45 am JST
 
 -- TODO: Get this from session
 user_me :: UserId
@@ -95,8 +95,8 @@ channel_announce = Id ""
 
 scheduledJobs :: Either ScheduleError [Job Attendance]
 scheduledJobs = sequence
-    [ mkJob "45 23 * * 0-4" remindMissing         -- 8:45 mon-fri
-    , mkJob "55 23 * * 0-4" sendDailySummary      -- 8:55 mon-fri
+    [ mkJob "30 23 * * 0-4" remindMissing         -- 8:30 mon-fri
+    , mkJob "45 23 * * 0-4" sendDailySummary      -- 8:45 mon-fri
     , mkJob "31 3 * * 5"    sendWeeklySummary     -- midday on friday
     , mkJob "00 20 * * 0-4" downloadSpreadsheet   -- 5:00 mon-fri
     ]
