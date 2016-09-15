@@ -20,7 +20,8 @@ instructions:
 3. Now you can to configure some things by changing the source (sorry!). In
    src/Main.hs, set the value `user_me` to the user ID of your slack bot, and
    set `channel_annouce` to the ID of the  channel you want attendancebot to
-   send reports to.
+   send reports to. You should also set the timezone, deadline, and report
+   schedule.
 4. Build `attendancebot` with `make`. The binary ends up in .stack-work/install
    somewhere.
 5. You can now start `attendancebot` with the following environment variables:
