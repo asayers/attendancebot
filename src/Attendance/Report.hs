@@ -53,7 +53,7 @@ dailySummary = do
           _ -> listEN missing <> " still " <> pl (length missing) "hasn't" "haven't" <> " checked in."
     let holidayTxt = case onHoliday of
           [] -> ""
-          _ -> " " <> listEN onHoliday <> " are on holiday today."
+          _ -> " " <> listEN onHoliday <> pl (length onHoliday) " is" " are" <> " on holiday today."
     return $ missingTxt <> holidayTxt
 
 -------------------------------------------------------------------------------
