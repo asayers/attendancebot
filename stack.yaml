@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-6.6
+resolver: lts-6.28
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -39,10 +39,12 @@ packages:
 - '.'
 - location:
     git: https://github.com/mpickering/slack-api
-    commit: "1179108"
+    commit: "9c5fffec887"
+  extra-dep: true
 - location:
     git: https://github.com/asayers/cron
-    commit: "4c32efa"
+    commit: "0fcbbe24611afb"
+  extra-dep: true
 
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
