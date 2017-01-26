@@ -25,10 +25,10 @@ runBotSchedule = void . liftBaseDiscard forkIO . runJobs . map snd
 
 scheduledJobs :: ChannelId -> Either ScheduleError BotSchedule
 scheduledJobs annChan = sequence
-    [ (,) "remindMissing"       <$> mkJob "30 23 * * 0-4" remindMissing                 -- 8:30 mon-fri
-    , (,) "sendDailySummary"    <$> mkJob "45 23 * * 0-4" (sendDailySummary annChan)    -- 8:45 mon-fri
-    , (,) "sendWeeklySummary"   <$> mkJob "31 3 * * 5"    (sendWeeklySummary annChan)   -- midday on friday
-    , (,) "downloadSpreadsheet" <$> mkJob "00 20 * * 0-4" downloadSpreadsheet           -- 5:00 mon-fri
+    [ (,) "remind absend people"  <$> mkJob "30 23 * * 0-4" remindMissing               -- 8:30 mon-fri
+    , (,) "send daily summary"    <$> mkJob "45 23 * * 0-4" (sendDailySummary annChan)  -- 8:45 mon-fri
+    , (,) "send weekly summary"   <$> mkJob "31 3 * * 5"    (sendWeeklySummary annChan) -- midday on friday
+    , (,) "download spreadsheet"  <$> mkJob "00 20 * * 0-4" downloadSpreadsheet         -- 5:00 mon-fri
     ]
 
 sendDailySummary :: ChannelId -> Attendance ()
@@ -47,6 +47,6 @@ downloadSpreadsheet :: Attendance ()
 downloadSpreadsheet = updateFromSpreadsheet =<< getAttendanceData
 
 ppSchedule :: BotSchedule -> T.Text
-ppSchedule = T.unlines . ("Scheduled jobs:":) . map ppJob
+ppSchedule = T.unlines . ("[Scheduled jobs]":) . map ppJob
   where
-    ppJob (name, Job sched _) = "    " <> T.pack (show sched) <> ": " <> name
+    ppJob (name, Job sched _) = T.pack (show sched) <> ": " <> name

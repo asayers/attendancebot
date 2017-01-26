@@ -126,6 +126,12 @@ isInHoliday day hol = case hol of
     CompletedHoliday start end -> day >= start && day <= end
     OneDayHoliday    d         -> day == d
 
+holidayIsStillRelevant :: Day -> Holiday -> Bool
+holidayIsStillRelevant today hol = case hol of
+    OngoingHoliday _ -> True
+    CompletedHoliday _ end -> end >= today
+    OneDayHoliday d -> d >= today
+
 -------------------------------------------------------------------------------
 -- Serialisable state updates
 
@@ -224,29 +230,30 @@ ppTimesheet :: TimeSheet -> UTCTime -> (UserId -> T.Text) -> T.Text
 ppTimesheet ts curTime getUsername = T.unlines $
     [ "Deadline: " <> T.pack (show (ts ^. tsDeadline))
     , "Current time: " <> T.pack (show (utcToLocalTimeTZ (ts ^. tsTimeZone) (fromThyme curTime)))
+    , ""
     ] ++ concatMap ppCheckIns days
     ++ ppHolidays
   where
-    days = take 10 $ reverse $ sort $ nub $ map snd $ HMS.keys $ ts ^. tsCheckIns
+    days = take 5 $ sort $ nub $ map snd $ HMS.keys $ ts ^. tsCheckIns
     ppCheckIns d =
-        ("Check-ins for " <> tshow d <> ":") :
+        ("[Check-ins for " <> tshow d <> "]") :
         [ ppCheckIn uid day time
         | ((uid, day), time) <- sortBy (compare `on` snd) $ HMS.toList (ts ^. tsCheckIns)
         , day == d
-        ]
+        ] ++ [""]
     ppCheckIn uid day time = mconcat
-        [ "  " <> getUsername uid <> " at "
+        [ getUsername uid <> " at "
         , tshow time
         , " (" <> ppTiming (lookupTiming ts uid day) <> ")"
         ]
-    -- TODO: only show recent
     ppHolidays =
-        "Holidays: " :
+        "[Holidays]" :
         [ ppHoliday uid hol
         | (uid, hols) <- HMS.toList $ ts ^. tsHolidays
         , hol <- hols
-        ]
-    ppHoliday uid hol = "  " <> getUsername uid <> case hol of
+        , holidayIsStillRelevant (curTime ^. _utctDay) hol
+        ] ++ [""]
+    ppHoliday uid hol = getUsername uid <> case hol of
         OngoingHoliday start -> " from " <> tshow start <> " to present"
         CompletedHoliday start end -> " from " <> tshow start <> " to " <> tshow end
         OneDayHoliday day -> " on " <> tshow day

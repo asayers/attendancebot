@@ -69,8 +69,8 @@ dumpDebug uid sched = do
     session <- getSession
     let getUsername' target = maybe "unknown" _userName $
           find (\user -> _userId user == target) (_slackUsers session)
-    sendIM uid $ T.unlines
-        [ "```"
+    sendIM uid $ T.concat
+        [ "```\n"
         , ppTimesheet ts curTime getUsername'
         , ppSchedule sched
         , "```"
