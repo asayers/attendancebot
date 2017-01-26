@@ -24,7 +24,7 @@ module Attendance.TimeSheet
     , goodRunLength
 
       -- * Debugging
-    , prettyPrintTimesheet
+    , ppTimesheet
     ) where
 
 import Control.Lens
@@ -220,8 +220,8 @@ goodRunLength ts start =
 -------------------------------------------------------------------------------
 -- For debugging
 
-prettyPrintTimesheet :: TimeSheet -> UTCTime -> (UserId -> T.Text) -> T.Text
-prettyPrintTimesheet ts curTime getUsername = T.unlines $
+ppTimesheet :: TimeSheet -> UTCTime -> (UserId -> T.Text) -> T.Text
+ppTimesheet ts curTime getUsername = T.unlines $
     [ "Deadline: " <> T.pack (show (ts ^. tsDeadline))
     , "Current time: " <> T.pack (show (utcToLocalTimeTZ (ts ^. tsTimeZone) (fromThyme curTime)))
     ] ++ concatMap ppCheckIns days

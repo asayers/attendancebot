@@ -32,7 +32,6 @@ module Attendance.Monad
     , sendIM
     , sendRichIM
     , getUsername
-    , dumpDebug
     ) where
 
 import Attendance.DB
@@ -53,7 +52,6 @@ import Data.Thyme
 import Data.Time.Zones
 import qualified Network.Google as G
 import qualified Network.Google.Storage as G
-import System.Cron
 import System.IO
 import qualified Web.Slack.Handle as H
 import Web.Slack.Monad
@@ -127,26 +125,6 @@ modifyTimeSheet ev = liftIO . flip commitEvent ev . dbH =<< getAttnH
 
 getTimeSheet :: Attendance TimeSheet
 getTimeSheet = liftIO . getState . dbH =<< getAttnH
-
-dumpDebug :: UserId -> [Job m] -> Attendance ()
-dumpDebug uid scheduledJobs = do
-    ts <- getTimeSheet
-    curTime <- liftIO $ getCurrentTime
-    session <- getSession
-    let getUsername' target = maybe "unknown" _userName $
-            find (\user -> _userId user == target) (_slackUsers session)
-    sendIM uid $ T.unlines
-        [ "```"
-        , prettyPrintTimesheet ts curTime getUsername'
-        , prettyPrintJobs scheduledJobs
-        , "```"
-        ]
-
--- FIXME
-prettyPrintJobs :: [Job m] -> T.Text
-prettyPrintJobs = T.unlines . ("Scheduled jobs:":) . map ppJob
-  where
-    ppJob (Job sched _) = "  " <> T.pack (show sched) <> ": <job>"
 
 -------------------------------------------------------------------------------
 -- UserTracker

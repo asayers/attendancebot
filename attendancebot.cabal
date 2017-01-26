@@ -23,6 +23,7 @@ executable attendancebot
       , Attendance.DB
       , Attendance.Monad
       , Attendance.Report
+      , Attendance.Schedule
       , Attendance.Spreadsheet
       , Attendance.TimeSheet
       , Attendance.UserTracker
