@@ -6,6 +6,7 @@
 
 module Main where
 
+import Attendance.Config
 import Attendance.Monad
 import Attendance.Report
 import Attendance.Spreadsheet
@@ -14,15 +15,11 @@ import Control.Lens
 import Control.Monad.Catch
 import Control.Monad.Except
 import Control.Monad.Trans.Control
-import Data.Maybe
 import qualified Data.Text as T
 import Data.Thyme
 import Data.Thyme.Clock.POSIX
 import Data.Thyme.Time
-import Data.Time.Zones
-import Data.Time.Zones.All
 import System.Cron
-import System.Environment
 import Web.Slack hiding (lines)
 
 -------------------------------------------------------------------------------
@@ -31,28 +28,30 @@ main :: IO ()
 main = do
     slackConfig <- getSlackConfig
     logPath <- getCheckinLog
+    botUser <- getBotUser
+    annChan <- getAnnouncementChannel
     putStrLn $ "Writing data to " ++ logPath
     runAttendance slackConfig logPath blacklist timezone deadline $ do
         liftIO $ putStrLn "Established slack connection"
         -- start cron thread
         liftIO $ putStrLn "Starting job scheduler..."
-        either throwM (void . liftBaseDiscard forkIO . runJobs) scheduledJobs
+        either throwM (void . liftBaseDiscard forkIO . runJobs) (scheduledJobs annChan)
         -- run main loop
         liftIO $ putStrLn "Fetching spreadsheet data..."
         updateFromSpreadsheet =<< getAttendanceData
         liftIO $ putStrLn "Listening to events..."
-        forever (getNextEvent >>= handleEvent)
+        forever (getNextEvent >>= handleEvent botUser annChan)
 
-handleEvent :: Event -> Attendance ()
-handleEvent ev = case ev of
-    ReactionAdded uid _ item_uid _ ts | item_uid == user_me ->
+handleEvent :: UserId -> ChannelId -> Event -> Attendance ()
+handleEvent botUser annChan ev = case ev of
+    ReactionAdded uid _ item_uid _ ts | item_uid == botUser ->
         checkin uid (timestampToUTCTime ts)
     Message cid (UserComment uid) msg (timestampToUTCTime -> ts) _ _ -> do
         isIM <- channelIsIM cid
-        when (isIM && uid /= user_me) $ case msg of
+        when (isIM && uid /= botUser) $ case msg of
             "active" -> markActive uid ts
             "inactive" -> markInactive uid ts
-            "debug" -> dumpDebug uid =<< either throwM return scheduledJobs
+            "debug" -> dumpDebug uid =<< either throwM return (scheduledJobs annChan)
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
             "spreadsheet" -> sendIM uid =<< ppSpreadsheet =<< getAttendanceData
             _ -> checkin uid ts
@@ -64,55 +63,25 @@ handleEvent ev = case ev of
     _ -> liftIO $ print ev              -- anything else is unexpected, log it
 
 -------------------------------------------------------------------------------
--- Configuration
 
-getSlackConfig :: IO SlackConfig
-getSlackConfig =
-    maybe (error "SLACK_API_TOKEN not set") SlackConfig <$> lookupEnv "SLACK_API_TOKEN"
-
-getCheckinLog :: IO FilePath
-getCheckinLog =
-    fromMaybe (error "ATTENDANCE_LOG not set") <$> lookupEnv "ATTENDANCE_LOG"
-
--- | Users which we want to ignore
-blacklist :: [UserId]
-blacklist =
-    [ Id "USLACKBOT" -- @slackbot
+scheduledJobs :: ChannelId -> Either ScheduleError [Job Attendance]
+scheduledJobs annChan = sequence
+    [ mkJob "30 23 * * 0-4" remindMissing                  -- 8:30 mon-fri
+    , mkJob "45 23 * * 0-4" (sendDailySummary annChan)     -- 8:45 mon-fri
+    , mkJob "31 3 * * 5"    (sendWeeklySummary annChan)    -- midday on friday
+    , mkJob "00 20 * * 0-4" downloadSpreadsheet            -- 5:00 mon-fri
     ]
 
-timezone :: TZ
-timezone = tzByLabel Asia__Tokyo
-
-deadline :: TimeOfDay
-deadline = TimeOfDay 8 45 (fromSeconds' 0)  -- 8:45 am JST
-
--- TODO: Get this from session
-user_me :: UserId
-user_me = Id ""  -- @attendancebot
-
-channel_announce :: ChannelId
-channel_announce = Id ""
-
--------------------------------------------------------------------------------
-
-scheduledJobs :: Either ScheduleError [Job Attendance]
-scheduledJobs = sequence
-    [ mkJob "30 23 * * 0-4" remindMissing         -- 8:30 mon-fri
-    , mkJob "45 23 * * 0-4" sendDailySummary      -- 8:45 mon-fri
-    , mkJob "31 3 * * 5"    sendWeeklySummary     -- midday on friday
-    , mkJob "00 20 * * 0-4" downloadSpreadsheet   -- 5:00 mon-fri
-    ]
-
-sendDailySummary :: Attendance ()
-sendDailySummary = sendMessage channel_announce =<< dailySummary
+sendDailySummary :: ChannelId -> Attendance ()
+sendDailySummary annChan = sendMessage annChan =<< dailySummary
 
 remindMissing :: Attendance ()
 remindMissing = mapM_ (uncurry sendIM) =<< missingReport
 
-sendWeeklySummary :: Attendance ()
-sendWeeklySummary = do
+sendWeeklySummary :: ChannelId -> Attendance ()
+sendWeeklySummary annChan = do
     attachment <- weeklySummary
-    ret <- sendRichMessage channel_announce "" [attachment]
+    ret <- sendRichMessage annChan "" [attachment]
     either (liftIO . putStrLn . T.unpack) return ret
 
 downloadSpreadsheet :: Attendance ()

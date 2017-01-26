@@ -19,7 +19,8 @@ executable attendancebot
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:
-        Attendance.DB
+        Attendance.Config
+      , Attendance.DB
       , Attendance.Monad
       , Attendance.Report
       , Attendance.Spreadsheet
@@ -49,11 +50,13 @@ executable attendancebot
       , old-locale
       , process >= 1.2.3
       , resourcet >= 1.1
+      , scientific >= 0.3.4
       , slack-api >= 0.9
       , temporary >= 1.2
       , text >= 1.2
       , thyme >= 0.3.5
       , time >= 1.5
+      , transformers >= 0.4.2
       , tz >= 0.1.1
       , unordered-containers >= 0.2.7
       , vector-space >= 0.10

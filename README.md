@@ -17,26 +17,27 @@ instructions:
    for attendancebot with permission to write to cloud storage. Record the
    credentials (in json format). See [here][google cloud auth] for more on how
    authentication works with google cloud platform.
-3. Now you can to configure some things by changing the source (sorry!). In
-   src/Main.hs, set the value `user_me` to the user ID of your slack bot, and
-   set `channel_annouce` to the ID of the  channel you want attendancebot to
-   send reports to. You should also set the timezone, deadline, and report
+3. Now you can configure some things by changing the source (sorry!). In
+   src/{Main,Config}.hs, you can set the timezone, deadline, and report
    schedule.
 4. Build `attendancebot` with `make`. The binary ends up in .stack-work/install
    somewhere.
-5. You can now start `attendancebot` with the following environment variables:
+5. You can now start `attendancebot` with the following environment variables
+   set appropriately:
 
-- `SLACK_API_TOKEN` should be the token for the slack bot user, eg.
-  `abcd-01234567890-abcdefghijklmnopqrstuvwxyz`
-- `GOOGLE_APPLICATION_CREDENTIALS` should be the path to the google credentials
-  file, eg. `/usr/local/etc/attendancebot/google-credentials.json`
-- `ATTENDANCE_LOG` should be a (writeable) path where attendancebot will keep
-  its database, eg. `/var/lib/attendancebot/eventlog`
+        SLACK_API_TOKEN="abcd-12345678901-ABCDEFGHIJKLMNOPQRSTUVWX"
+        GOOGLE_APPLICATION_CREDENTIALS="/usr/local/etc/attendancebot/google-credentials.json"
+        SPREADSHEET_ID="A1B2C2D-4E5F6G7H8I9J0K1L2M3N4O4P5Q6R7S8T9U0V"
+        SPREADSHEET_RANGE="A4:K369"
+        ATTENDANCEBOT_USER="U1A2B3C4D"
+        ANNOUNCEMENT_CHANNEL="C1A2B3C4D"
+        ATTENDANCE_LOG="/var/lib/attendancebot/eventlog"
 
 If you want to use the included systemd service file (attendancebot.service),
-then you'll need to change `EnvironmentFile` to point to a script which sets
-the above environment variables, and change `ExecStart` to point to the
-attendancebot binary.
+then put the above variables in /usr/local/etc/attendancebot/defaults and move
+the binary to /usr/local/bin/attendancebot. Also, make sure you add a user
+called "attendancebot", and that `ATTENDANCE_LOG` is readable/writable for this
+user.
 
 All of this could be a lot smoother, but as I said, this is unreleased
 software.
@@ -45,4 +46,3 @@ software.
 [create bot user]: https://my.slack.com/services/new/bot
 [google cloud platform]: https://cloud.google.com/
 [google cloud auth]: https://cloud.google.com/docs/authentication
-
