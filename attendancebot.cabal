@@ -22,6 +22,7 @@ executable attendancebot
         Attendance.DB
       , Attendance.Monad
       , Attendance.Report
+      , Attendance.Spreadsheet
       , Attendance.TimeSheet
       , Attendance.UserTracker
   build-depends:

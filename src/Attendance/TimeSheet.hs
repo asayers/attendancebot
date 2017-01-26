@@ -227,7 +227,7 @@ prettyPrintTimesheet ts curTime getUsername = T.unlines $
     ] ++ concatMap ppCheckIns days
     ++ ppHolidays
   where
-    days = take 10 $ sort $ nub $ map snd $ HMS.keys $ ts ^. tsCheckIns
+    days = take 10 $ reverse $ sort $ nub $ map snd $ HMS.keys $ ts ^. tsCheckIns
     ppCheckIns d =
         ("Check-ins for " <> tshow d <> ":") :
         [ ppCheckIn uid day time
