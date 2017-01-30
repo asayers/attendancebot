@@ -91,16 +91,14 @@ It also publishes a weekly summary to the same channel which includes a matrix
 of people are days, specifying whether people were on time, late, on holiday,
 or AWOL. It also has a nice chart.
 
-> Week beginning 2017-01-16
-> ```
-> steve      ◆◆◆◆◆
-> alan       ◈◈◈◆◈
-> bob        ◆◇◆◆◇
-> phil       HH◆◆◆
-> ```
-> Weekly summary | Jan 16th at 9:00 AM
->
-> ![chart](https://www.googleapis.com/download/storage/v1/b/attendancebot-141720.appspot.com/o/weekly-attendance-graphs%2F2017-01-20_03-31-00.png?generation=1484883061020000&alt=media)
+```
+steve      ◆◆◆◆◆ | 7.8:1 | 81.9%
+alan       ◈◈◈◆◈ | 4.3:1 | 72.9%
+bob        ◆◇◆◆◇ | 3.4:1 | 48.1%
+phil       HH◆◆◆ | 1.7:1 | 54.3%
+Summary for the week beginning 2017-01-16.
+Key: daily attendance | on-time:late ratio | score weighted by recency
+```
 
 If you say "debug" to attendancebot, it will reply with a dump of its internal
 state (or at least, the parts which are likely still to be relevant). If team
@@ -110,23 +108,6 @@ might consider this a security issue. Example output:
 ```
 Deadline: 08:45:00
 Current time: 2017-01-26 18:59:08.79992
-
-[Check-ins for 2016-08-23]
-steve at 07:08:05 (on time)
-bob at 08:16:21 (on time)
-alan at 08:57:05 (late)
-phil at 08:57:06 (late)
-
-[Check-ins for 2016-08-24]
-phil at 08:40:15 (on time)
-alan at 08:45:03 (late)
-bob at 08:45:05 (late)
-steve at 08:45:14 (late)
-
-[Check-ins for 2016-08-25]
-steve at 07:22:15 (on time)
-phil at 08:45:05 (late)
-alan at 08:45:06 (late)
 
 [Check-ins for 2016-08-26]
 alan at 08:45:09 (late)
