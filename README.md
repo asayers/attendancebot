@@ -15,11 +15,13 @@ Prep work
 
 1. Attendancebot runs as a custom [slack bot user]. Create one [here][create
    bot user]. You can call it whatever you want; record the API token.
-2. The weekly attendance summaries include a graph which must be uploaded
+2. Attendancebot uses various google APIs. Create a [google cloud platform]
+   account if you don't have one, and create a project for attendancebot with
+   permission to write to cloud storage. Record the credentials in json format.
+   ([More info][google cloud auth])
+3. The weekly attendance summaries include a graph which must be uploaded
    somewhere accessible. We use google cloud storage, which is like S3. Create
-   a [google cloud platform] account if you don't have one, and create a
-   project for attendancebot with permission to write to cloud storage. Record
-   the credentials in json format. ([More info][google cloud auth])
+   a bucket for attendancebot to upload these graphs to.
 3. We also use the Google account to access an "attendance spreadsheet", which
    team members are meant to use to take holiday. Create this and make a note
    of its spreadsheet id. See src/SpreadSheet.hs for the required format.
@@ -65,6 +67,7 @@ Running
     ATTENDANCEBOT_USER="U1A2B3C4D"
     ANNOUNCEMENT_CHANNEL="C1A2B3C4D"
     ATTENDANCE_LOG="/var/lib/attendancebot/eventlog"
+    UPLOAD_BUCKET="attendancebot-123456.appspot.com"
 
 If you're using the included systemd service file, put the above variables in
 /usr/local/etc/attendancebot/defaults. Also, make sure you add a user called
