@@ -19,14 +19,18 @@ executable attendancebot
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:
-        Attendance.Config
-      , Attendance.DB
-      , Attendance.Monad
-      , Attendance.Report
-      , Attendance.Schedule
-      , Attendance.Spreadsheet
+        AtnBot.Actions
+      , AtnBot.Config
+      , AtnBot.DB
+      , AtnBot.Monad
+      , AtnBot.Report
+      , AtnBot.Schedule
+      , AtnBot.Spreadsheet
+      , AtnBot.UserTracker
+      , Attendance.BotState
+      , Attendance.Calendar
       , Attendance.TimeSheet
-      , Attendance.UserTracker
+      , Attendance.Timing
   build-depends:
         aeson >= 0.11.2
       , attoparsec >= 0.13

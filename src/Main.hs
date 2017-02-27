@@ -6,16 +6,16 @@
 
 module Main where
 
-import Attendance.Config
-import Attendance.Monad
-import Attendance.Report
-import Attendance.Schedule
-import Attendance.Spreadsheet
+import AtnBot.Actions
+import AtnBot.Config
+import AtnBot.Monad
+import AtnBot.Report
+import AtnBot.Schedule
+import Attendance.BotState
 import Attendance.TimeSheet
 import Control.Lens
 import Control.Monad.Catch
 import Control.Monad.Except
-import Data.List
 import qualified Data.Text as T
 import Data.Thyme
 import Data.Thyme.Clock.POSIX
@@ -26,34 +26,31 @@ import Web.Slack hiding (lines)
 
 main :: IO ()
 main = do
-    slackConfig <- getSlackConfig
-    logPath <- getCheckinLog
-    botUser <- getBotUser
-    annChan <- getAnnouncementChannel
     putStrLn $ "Writing data to " ++ logPath
-    runAttendance slackConfig logPath blacklist timezone deadline $ do
+    runAtnBot slackConfig logPath $ do
         liftIO $ putStrLn "Established slack connection"
         -- start cron thread
         liftIO $ putStrLn "Starting job scheduler..."
-        either throwM runBotSchedule (scheduledJobs annChan)
+        either throwM runBotSchedule scheduledJobs
         -- run main loop
         liftIO $ putStrLn "Fetching spreadsheet data..."
-        updateFromSpreadsheet =<< getAttendanceData
+        updateFromSpreadsheet
         liftIO $ putStrLn "Listening to events..."
-        forever (getNextEvent >>= handleEvent botUser annChan)
+        forever (getNextEvent >>= handleEvent)
 
-handleEvent :: UserId -> ChannelId -> Event -> Attendance ()
-handleEvent botUser annChan ev = case ev of
+handleEvent :: Event -> AtnBot ()
+handleEvent ev = case ev of
     ReactionAdded uid _ item_uid _ ts | item_uid == botUser ->
         checkin uid (timestampToUTCTime ts)
     Message cid (UserComment uid) msg (timestampToUTCTime -> ts) _ _ -> do
         isIM <- channelIsIM cid
         when (isIM && uid /= botUser) $ case msg of
-            "active" -> markActive uid ts
-            "inactive" -> markInactive uid ts
-            "debug" -> dumpDebug uid =<< either throwM return (scheduledJobs annChan)
+            "debug" -> dumpDebug uid =<< either throwM return scheduledJobs
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
-            "spreadsheet" -> sendIM uid =<< ppSpreadsheet =<< getAttendanceData
+            "spreadsheet" -> sendIM uid =<< printSpreadsheet
+            "annouce weekly" -> sendWeeklySummary
+            "annouce daily" -> sendDailySummary
+            "remind missing" -> remindMissing
             _ -> checkin uid ts
     ImCreated _ im -> trackUser im
     PresenceChange _ _    -> return ()  -- expected, ignore
@@ -62,16 +59,16 @@ handleEvent botUser annChan ev = case ev of
     MessageResponse _ _ _ -> return ()  -- expected, ignore
     _ -> liftIO $ print ev              -- anything else is unexpected, log it
 
-dumpDebug :: UserId -> BotSchedule -> Attendance ()
+dumpDebug :: UserId -> BotSchedule -> AtnBot ()
 dumpDebug uid sched = do
-    ts <- getTimeSheet
-    curTime <- liftIO $ getCurrentTime
-    session <- getSession
-    let getUsername' target = maybe "unknown" _userName $
-          find (\user -> _userId user == target) (_slackUsers session)
+    ts <- flip userTimeSheet uid <$> getBotState
+    -- curTime <- liftIO $ getCurrentTime
+    -- session <- getSession
+    -- let getUsername' target = maybe "unknown" _userName $
+    --       find (\user -> _userId user == target) (_slackUsers session)
     sendIM uid $ T.concat
         [ "```\n"
-        , ppTimesheet ts curTime getUsername'
+        , ppTimesheet ts
         , ppSchedule sched
         , "```"
         ]

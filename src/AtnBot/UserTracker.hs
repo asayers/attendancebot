@@ -3,7 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Attendance.UserTracker
+module AtnBot.UserTracker
     ( TrackerHandle
     , newTrackerHandle
     , trackUser

@@ -9,19 +9,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Attendance.Monad
-    ( Attendance, runAttendance
-    , Scopes
+module AtnBot.Monad
+    ( AtnBot
+    , runAtnBot
 
-      -- * Modifying
-    , checkin
-    , markInactive
-    , markActive
-    , markHoliday
+    , modifyBotState
+    , getBotState
     , trackUser
-
-      -- * Querying
-    , getTimeSheet
     , getTrackedUsers
     , channelIsIM
 
@@ -32,12 +26,15 @@ module Attendance.Monad
     , sendIM
     , sendRichIM
     , getUsername
+    , getUsernames
     ) where
 
-import Attendance.DB
+import AtnBot.Config
+import AtnBot.DB
+import AtnBot.UserTracker (TrackerHandle, newTrackerHandle)
+import qualified AtnBot.UserTracker as UT
 import Attendance.TimeSheet
-import Attendance.UserTracker (TrackerHandle, newTrackerHandle)
-import qualified Attendance.UserTracker as UT
+import Attendance.BotState
 import Control.Lens
 import Control.Monad.Base
 import Control.Monad.Catch
@@ -46,96 +43,66 @@ import Control.Monad.Trans.Control
 import Control.Monad.Trans.Resource
 import Data.List
 import Data.Maybe
-import Data.Monoid
 import qualified Data.Text as T
-import Data.Thyme
-import Data.Time.Zones
 import qualified Network.Google as G
 import qualified Network.Google.Storage as G
 import System.IO
 import qualified Web.Slack.Handle as H
 import Web.Slack.Monad
 
-newtype Attendance a = Attendance (ReaderT AttnH (ResourceT IO) a)
+newtype AtnBot a = AtnBot (ReaderT AttnH (ResourceT IO) a)
     deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch
              , MonadResource, MonadBase IO, MonadMask)
 
-instance MonadBaseControl IO Attendance where
-    type StM Attendance a = a
-    liftBaseWith f = Attendance $ liftBaseWith $ \run -> f (\(Attendance x) -> run x)
-    restoreM = Attendance . restoreM
+instance MonadBaseControl IO AtnBot where
+    type StM AtnBot a = a
+    liftBaseWith f = AtnBot $ liftBaseWith $ \run -> f (\(AtnBot x) -> run x)
+    restoreM = AtnBot . restoreM
 
-instance MonadSlack Attendance where
-    askSlackHandle = Attendance $ slackH <$> ask
+instance MonadSlack AtnBot where
+    askSlackHandle = AtnBot $ slackH <$> ask
 
-instance G.MonadGoogle Scopes Attendance where
+instance G.MonadGoogle Scopes AtnBot where
     liftGoogle (G.Google x) =
         liftResourceT . runReaderT x . googleEnv =<< getAttnH
 
 data AttnH = AttnH
     { slackH :: H.SlackHandle
     , trackerH :: TrackerHandle
-    , dbH :: DBHandle TimeSheetUpdate TimeSheet
+    , dbH :: DBHandle BotStateUpdate BotState
     , googleEnv :: G.Env Scopes
     }
 
-type Scopes = '[ "https://www.googleapis.com/auth/devstorage.read_write"
-               , "https://www.googleapis.com/auth/spreadsheets.readonly"
-               ]
-
-runAttendance :: SlackConfig -> FilePath -> [UserId] -> TZ -> TimeOfDay -> Attendance a -> IO a
-runAttendance conf dbPath blacklist tz deadline (Attendance x) = do
-    let timeSheet = newTimeSheet tz deadline
+runAtnBot :: SlackConfig -> FilePath -> AtnBot a -> IO a
+runAtnBot conf dbPath (AtnBot x) = do
+    let initialState = newBotState (defaultTimeSheet timezone deadline)
     putStrLn "Restoring state..."
-    dbH <- newDBHandle updateTimeSheet timeSheetUpdate timeSheet dbPath
+    dbH <- newDBHandle updateBotState botStateUpdate_ initialState dbPath
     logger <- G.newLogger G.Debug stdout
     googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
     H.withSlackHandle conf $ \slackH -> do
         trackerH <- newTrackerHandle (H.getSession slackH) blacklist
         runResourceT $ runReaderT x AttnH{..}
 
-getAttnH :: Attendance AttnH
-getAttnH = Attendance ask
+getAttnH :: AtnBot AttnH
+getAttnH = AtnBot ask
 
--------------------------------------------------------------------------------
--- TimeSheet
+getBotState :: AtnBot BotState
+getBotState = liftIO . getState . dbH =<< getAttnH
 
-checkin :: UserId -> UTCTime -> Attendance ()
-checkin uid ts = do
-    modifyTimeSheet $ CheckIn uid ts
-    sendIM uid "Your attendance has been noted. Have a good day!"
-
-markInactive :: UserId -> UTCTime -> Attendance ()
-markInactive uid ts = do
-    modifyTimeSheet $ MarkInactive uid ts
-    sendIM uid "You will be marked as inactive from tomorrow onwards. Have a nice holiday!"
-
-markActive :: UserId -> UTCTime -> Attendance ()
-markActive uid ts = do
-    modifyTimeSheet $ MarkActive uid ts
-    sendIM uid "Welcome back! You have been marked as active from today onwards."
-
-markHoliday :: UserId -> Day -> Double -> Attendance ()
-markHoliday uid day amt = do
-    modifyTimeSheet $ MarkHoliday uid day amt
-    sendIM uid $ "Looks like you're taking the day off on " <> T.pack (show day) <> ". Have a nice time!"
-
-modifyTimeSheet :: TimeSheetUpdate -> Attendance ()
-modifyTimeSheet ev = liftIO . flip commitEvent ev . dbH =<< getAttnH
-
-getTimeSheet :: Attendance TimeSheet
-getTimeSheet = liftIO . getState . dbH =<< getAttnH
+modifyBotState :: BotStateUpdate -> AtnBot ()
+modifyBotState ev = liftIO . flip commitEvent ev . dbH =<< getAttnH
 
 -------------------------------------------------------------------------------
 -- UserTracker
 
-trackUser :: IM -> Attendance ()
+trackUser :: IM -> AtnBot ()
 trackUser im = getAttnH >>= \h -> liftIO $ UT.trackUser (trackerH h) im
 
-getTrackedUsers :: Attendance [UserId]
+getTrackedUsers :: AtnBot [UserId]
 getTrackedUsers = getAttnH >>= \h -> liftIO $ UT.getTrackedUsers (trackerH h)
 
-channelIsIM :: ChannelId -> Attendance Bool
+channelIsIM :: ChannelId -> AtnBot Bool
 channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
 
 -------------------------------------------------------------------------------
@@ -143,22 +110,26 @@ channelIsIM cid = getAttnH >>= \h -> liftIO $ UT.channelIsIM (trackerH h) cid
 
 uploadFile :: G.MonadGoogle Scopes m => FilePath -> T.Text -> m T.Text
 uploadFile filepath name = do
-    let bucket = "attendancebot-141720.appspot.com"
     fileBody <- G.sourceBody filepath
-    obj <- G.upload (G.objectsInsert bucket G.object' & (G.oiName .~ Just name) . (G.oiPredefinedACL .~ Just G.OIPAPublicRead)) fileBody
+    obj <- G.upload uploadAction fileBody
     return $ fromMaybe (error "uploadFile: no link returned") $ obj ^. G.objMediaLink
+  where
+    uploadAction =
+        G.objectsInsert uploadBucket G.object'
+        & (G.oiName .~ Just name)
+        . (G.oiPredefinedACL .~ Just G.OIPAPublicRead)
 
 -------------------------------------------------------------------------------
 -- Slack helpers
 
-sendIM :: UserId -> T.Text -> Attendance ()
+sendIM :: UserId -> T.Text -> AtnBot ()
 sendIM uid msg = do
     h <- trackerH <$> getAttnH
     liftIO (UT.lookupIMChannel h uid) >>= \case
         Just cid -> sendMessage cid msg
         Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid
 
-sendRichIM :: UserId -> T.Text -> [Attachment] -> Attendance ()
+sendRichIM :: UserId -> T.Text -> [Attachment] -> AtnBot ()
 sendRichIM uid msg attnts = do
     h <- trackerH <$> getAttnH
     liftIO (UT.lookupIMChannel h uid) >>= \case
@@ -174,3 +145,9 @@ getUsername uid =
     maybe "unknown" _userName .
         find (\user -> _userId user == uid) .
             _slackUsers <$> getSession
+
+getUsernames :: MonadSlack m => m (UserId -> T.Text)
+getUsernames = do
+    SlackSession{..} <- getSession
+    return $ \uid ->
+        maybe "unknown" _userName $ find (\user -> _userId user == uid) _slackUsers

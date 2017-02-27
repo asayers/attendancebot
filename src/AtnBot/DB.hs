@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 
-module Attendance.DB
+module AtnBot.DB
     ( DBHandle
     , newDBHandle
     , commitEvent

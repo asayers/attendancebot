@@ -12,19 +12,15 @@
 --     2017-01-03 |           |           | ...
 --     2017-01-04 |       0.5 |           | ...
 --
-module Attendance.Spreadsheet
+module AtnBot.Spreadsheet
     ( getAttendanceData
-    , updateFromSpreadsheet
     , ppSpreadsheet
     ) where
 
-import Attendance.Config
-import Attendance.Monad
-import Attendance.TimeSheet
+import AtnBot.Config
+import Attendance.Calendar
 import Control.Exception.Lifted
 import Control.Lens
-import Control.Monad
-import Control.Monad.IO.Class
 import Control.Monad.Trans.Control
 import qualified Data.Aeson as A
 import qualified Data.HashMap.Strict as HMS
@@ -39,29 +35,11 @@ import qualified Network.Google.Sheets as G
 import System.Locale
 import Web.Slack.Monad
 
-updateFromSpreadsheet :: HMS.HashMap (UserId, Day) Double -> Attendance ()
-updateFromSpreadsheet xs = do
-    ts <- getTimeSheet
-    forM_ (HMS.toList xs) $ \((uid, day), amt) ->
-        case lookupTiming ts uid day of
-            _ | amt <= 0 -> return ()
-            OnHoliday -> return ()
-            _ -> markHoliday uid day amt
-
-ppSpreadsheet :: HMS.HashMap (UserId, Day) Double -> Attendance T.Text
-ppSpreadsheet xs = do
-    rows <- forM (HMS.toList xs) $ \((uid, day), offtime) -> do
-      uname <- getUsername uid
-      return $ "  " <> uname <> " on " <> T.pack (show day) <> ": " <> T.pack (show offtime)
-    return $ T.unlines $ [ "```" ] ++ rows ++ [ "```" ]
-
 getAttendanceData
     :: (G.MonadGoogle Scopes m, MonadBaseControl IO m)
     => m (HMS.HashMap (UserId, Day) Double)
 getAttendanceData = do
-    sheetId <- liftIO getSpreadsheetId
-    sheetRange <- liftIO getSpreadsheetRange
-    vr'e <- try $ G.send (G.spreadsheetsValuesGet sheetId sheetRange)
+    vr'e <- try $ G.send (G.spreadsheetsValuesGet spreadsheetId spreadsheetRange)
     case vr'e of
         Right vr -> return $ processTable (vr ^. G.vrValues)
         Left (G.TransportError _) -> return HMS.empty
@@ -100,3 +78,23 @@ fromDayVal =
 fromStringVal :: A.Value -> T.Text
 fromStringVal (A.String x) = T.strip x
 fromStringVal x = error "fromStringVal: not a string: " <> T.pack (show x)
+
+-------------------------------------------------------------------------------
+
+ppSpreadsheet :: (UserId -> T.Text) -> HMS.HashMap (UserId, Day) Double -> T.Text
+ppSpreadsheet username xs = T.unlines $
+    [ "Raw data from spreadsheet:"
+    , "```"
+    ] ++ map ppRawRow (HMS.toList xs) ++
+    [ "```"
+    , "Processed data:"
+    , "```"
+    ] ++ map ppProcRow (HMS.toList $ spreadsheetToHolidays xs) ++
+    [ "```"
+    ]
+  where
+    ppRawRow ((uid, day), offtime) =
+        username uid <> " on " <> T.pack (show day) <> ": " <> T.pack (show offtime)
+    ppProcRow (uid, cal) = "[" <> username uid <> "]\n" <> T.pack (show cal)
+    spreadsheetToHolidays :: HMS.HashMap (UserId, Day) Double -> HMS.HashMap UserId Calendar
+    spreadsheetToHolidays = HMS.foldrWithKey (\(uid, day) _ -> over (at uid . non (weekendsOff deadline)) (markException day "" NotExpected)) HMS.empty

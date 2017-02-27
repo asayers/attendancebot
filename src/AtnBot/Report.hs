@@ -1,13 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Attendance.Report
+module AtnBot.Report
     ( dailySummary
     , weeklySummary
     , missingReport
     ) where
 
-import Attendance.Monad
+import AtnBot.Monad
+import Attendance.BotState
+import Attendance.Timing
 import Attendance.TimeSheet
 import Control.Lens
 import Control.Monad
@@ -19,29 +21,28 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Data.Thyme
 import Data.Thyme.Calendar.WeekDate
-import Data.Thyme.Clock.POSIX
-import Data.Thyme.Time
 import Graphics.Rendering.Chart.Backend.Cairo
 import Graphics.Rendering.Chart.Easy
 import System.FilePath
 import System.IO.Temp
 import System.Locale
+import Text.Printf
 import Web.Slack hiding (lines)
 
-missingReport :: Attendance [(UserId, T.Text)]
+missingReport :: AtnBot [(UserId, T.Text)]
 missingReport = do
-    missing <- lateComers <$> getTimeSheet <*> liftIO today
+    missing <- lateComers <$> getBotState <*> liftIO today
     forM missing $ \uid -> do
         uname <- getUserName uid
         liftIO $ T.putStrLn $ "Sending reminder to " <> uname
         return (uid, "You haven't checked in yet today. Please send me a message or add a reaction to something I've said to let me know you're here.")
 
-dailySummary :: Attendance T.Text
+dailySummary :: AtnBot T.Text
 dailySummary = do
-    ts <- getTimeSheet
-    missing   <- fmap sort . mapM getUserName =<< lateComers    ts <$> liftIO today
-    onHoliday <- fmap sort . mapM getUserName =<< holidayMakers ts <$> liftIO today
-    streak <- goodRunLength ts <$> liftIO yesterday
+    bs <- getBotState
+    missing   <- fmap sort . mapM getUserName =<< lateComers    bs <$> liftIO today
+    onHoliday <- fmap sort . mapM getUserName =<< holidayMakers bs <$> liftIO today
+    streak <- goodRunLength bs <$> liftIO yesterday
     let missingTxt = case missing of
           [] -> "Everyone got in on time! Current streak: " <>
                 T.pack (show $ streak + 1) <> pl (streak + 1) " day." " days."
@@ -55,11 +56,12 @@ dailySummary = do
           [] -> ""
           _ -> " " <> listEN onHoliday <> pl (length onHoliday) " is" " are" <> " on holiday today."
     return $ missingTxt <> holidayTxt
+    -- holiday uid =
 
 -------------------------------------------------------------------------------
 -- Weekly summary
 
-weeklySummary :: Attendance Attachment
+weeklySummary :: AtnBot Attachment
 weeklySummary = do
     users <- getTrackedUsers
     rows <- concat <$> mapM summaryRow users
@@ -69,67 +71,82 @@ weeklySummary = do
     --         [ "◆  checked in before 9:00"
     --         , "◈  checked in after 9:00"
     --         , "◇  didn't check in"
+    --         , "H  on holiday"
+    --         , "The ratio of on-time to late is also shown"
     --         ]
-    let ts = UTCTime monday (fromSeconds' 0) ^. from utcTime . posixTime . from thyme
+    let legend = "Key: daily attendance | on-time:late ratio | score weighted by recency"
+    colour <- getColour
     chartUrl <- renderWeeklySummaryChart
     return $ defaultAttachment
-          { attachmentTitle  = Just $ "Week beginning " <> monday'
-          , attachmentFields = rows
-          , attachmentFooter = Just "Weekly summary"
-          , attachmentTs     = Just ts
-          , attachmentImageUrl = Just chartUrl
+          { attachmentFields = rows
+          , attachmentFooter = Just $ "Summary for the week beginning " <> monday' <> ".\n" <> legend
+          , attachmentThumbUrl = Just chartUrl
           , attachmentFallback = "Attendance summary for the week beginning" <> monday'
+          , attachmentColor = colour
           }
 
-summaryRow :: UserId -> Attendance [Field]
+getColour :: AtnBot AttachmentColor
+getColour = do
+    bs <- getBotState
+    users <- getTrackedUsers
+    thisWeek <- liftIO getThisWeek
+    let timings' = [ getTiming (userTimeSheet bs uid) day | uid <- users, day <- thisWeek ]
+    let mkScore = \case OnTime{} -> 2; Late{} -> 0; Absent{} -> 0; OnHoliday{} -> 2
+    let finalScore = sum (map mkScore timings') / fromIntegral (length timings')
+    return $ case round (finalScore :: Double) :: Int of
+        0 -> DangerColor
+        1 -> WarningColor
+        2 -> GoodColor
+        _ -> DefaultColor
+
+summaryRow :: UserId -> AtnBot [Field]
 summaryRow uid = do
-    ts <- getTimeSheet
+    bs <- getBotState
     uname <- getUserName uid
-    badges <- T.pack . map (badge . lookupTiming ts uid) <$> liftIO getThisWeek
-    return [Field Nothing uname True, Field Nothing badges True]
+    badges <- map (badge . getTiming (userTimeSheet bs uid)) <$> liftIO getThisWeek
+    td <- liftIO today
+    let s = score (userTimeSheet bs uid) td
+    let r = ratio (userTimeSheet bs uid) td
+    let summary = T.pack $ printf "%s  |  %.1f:1  |  %.1f%%" badges r (s * 100)
+    return [Field Nothing uname True, Field Nothing summary True]
   where
-    badge (OnTime _) = '◆' -- '▩'   -- '◾' -- '◼' -- '■'
-    badge (Late   _) = '◈'  -- '◪' -- '▨'
-    badge Absent     = '◇' -- '□'  -- '◽' -- '◻'-- '□'
-    badge OnHoliday  = 'H' -- '□'  -- '◽' -- '◻'-- '□'
+    badge OnTime{}    = '◆' -- '▩'   -- '◾' -- '◼' -- '■'
+    badge Late{}      = '◈'  -- '◪' -- '▨'
+    badge Absent{}    = '◇' -- '□'  -- '◽' -- '◻'-- '□'
+    badge OnHoliday{} = 'H' -- '□'  -- '◽' -- '◻'-- '□'
 
 -------------------------------------------------------------------------------
 -- Weekly summary chart
 
-renderWeeklySummaryChart :: Attendance T.Text
+renderWeeklySummaryChart :: AtnBot T.Text
 renderWeeklySummaryChart =
     withSystemTempDirectory "weekly-attendance-graph" $ \outdir -> do
         timestamp <- formatTime defaultTimeLocale "%Y-%m-%d_%H-%M-%S" <$> liftIO getCurrentTime
         let outpath = outdir </> "out.png"
         let name = "weekly-attendance-graphs/" <> T.pack timestamp <> ".png"
-        timeSheet <- getTimeSheet
+        timeSheet <- getBotState
         liftIO $ makeChart timeSheet outpath
         uploadFile outpath name
 
-makeChart :: TimeSheet -> FilePath -> IO ()
-makeChart ts outpath = do
-    recentDays <- take 20 . pastWeekDays <$> today
-    let dataset = map (summaryOfDay ts) recentDays
+makeChart :: BotState -> FilePath -> IO ()
+makeChart bs outpath = do
+    recentDays <- take 5 . pastWeekDays <$> today
+    let dataset = map (summaryOfDay bs) recentDays
     let chart = def
-          & plot_bars_titles .~ ["On time","Late"]
+          -- & plot_bars_titles .~ ["On time","Late"]
           & plot_bars_style .~ BarsStacked
           & plot_bars_values .~ dataset
+          & plot_bars_spacing .~ BarsFixWidth 10
     let layout = def & layout_plots .~ [ plotBars chart ]
-    let fileOpts = FileOptions{ _fo_size = (400,150), _fo_format = PNG }
+    let fileOpts = FileOptions{ _fo_size = (125,125), _fo_format = PNG }
     void $ renderableToFile fileOpts outpath (layoutToRenderable layout)
 
-summaryOfDay :: TimeSheet -> Day -> (PlotIndex, [Int])
-summaryOfDay ts day =
+summaryOfDay :: BotState -> Day -> (PlotIndex, [Int])
+summaryOfDay bs day =
     (PlotIndex (fromEnum day), [onTime, late])
   where
-    checkins = map (\uid -> lookupTiming ts uid day) (allUsers ts)
-    onTime = length $ filter isOnTime checkins
-    late   = length $ filter isLate   checkins
-
-isOnTime, isLate :: Timing -> Bool
-isOnTime = \case OnTime _ -> True; _ -> False
-isLate   = \case Late   _ -> True; _ -> False
--- isAbsent = \case Absent   -> True; _ -> False
+    onTime = length $ filter (isOnTime . snd) $ timings bs day
+    late   = length $ filter (isLate   . snd) $ timings bs day
 
 -------------------------------------------------------------------------------
 -- Time helpers
