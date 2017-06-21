@@ -30,6 +30,6 @@ scheduledJobs = sequence
     ]
 
 ppSchedule :: BotSchedule -> T.Text
-ppSchedule = T.unlines . ("[Scheduled jobs]":) . map ppJob
+ppSchedule = T.unlines . map ppJob
   where
     ppJob (name, Job sched _) = T.pack (show sched) <> ": " <> name

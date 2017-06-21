@@ -114,15 +114,15 @@ halflife today day = r ^ (today .-. day)   -- weight by halflife decay
 -- Debugging
 
 ppTimesheet :: TimeSheet -> T.Text
-ppTimesheet ts = T.unlines $ concatMap ppCheckIns days -- ++ ppHolidays'
+ppTimesheet ts = T.unlines $ map ppCheckIns days -- ++ ppHolidays'
   where
     days = reverse $ take 5 $ reverse $ sort $ nub $ HMS.keys $ ts ^. tsCheckIns
     ppCheckIns d =
-        ("[Check-ins for " <> tshow d <> "]") :
+        tshow d <> ": " <> T.intercalate "; "
         [ ppCheckIn day time
         | (day, time) <- sortBy (compare `on` snd) $ HMS.toList (ts ^. tsCheckIns)
         , day == d
-        ] ++ [""]
+        ]
     ppCheckIn day time = tshow time <> " (" <> ppTiming (getTiming ts day) <> ")"
     -- ppHolidays' =
     --     "[Holidays]" :

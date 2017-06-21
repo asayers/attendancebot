@@ -16,6 +16,7 @@ import Attendance.TimeSheet
 import Control.Lens
 import Control.Monad.Catch
 import Control.Monad.Except
+import Data.Monoid
 import qualified Data.Text as T
 import Data.Thyme
 import Data.Thyme.Clock.POSIX
@@ -66,9 +67,12 @@ dumpDebug uid sched = do
     -- session <- getSession
     -- let getUsername' target = maybe "unknown" _userName $
     --       find (\user -> _userId user == target) (_slackUsers session)
-    sendIM uid $ T.concat
-        [ "```\n"
+    getUsername' <- getUsernames
+    sendIM uid $ T.unlines
+        [ "```"
+        , "[Check-ins for " <> getUsername' uid <> "]"
         , ppTimesheet ts
+        , "[Scheduled jobs]"
         , ppSchedule sched
         , "```"
         ]
