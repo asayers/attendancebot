@@ -48,8 +48,8 @@ handleEvent ev = case ev of
             "debug" -> dumpDebug uid =<< either throwM return scheduledJobs
             "summary" -> sendRichIM uid "" . (:[]) =<< weeklySummary
             "spreadsheet" -> sendIM uid =<< printSpreadsheet
-            "annouce weekly" -> sendWeeklySummary
-            "annouce daily" -> sendDailySummary
+            "announce weekly" -> sendWeeklySummary
+            "announce daily" -> sendDailySummary
             "remind missing" -> remindMissing
             _ -> checkin uid ts
     ImCreated _ im -> trackUser im

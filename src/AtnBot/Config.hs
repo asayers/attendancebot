@@ -44,7 +44,7 @@ botUser :: UserId
 botUser = Id . T.pack $ lookupEnvReq "ATTENDANCEBOT_USER"
 
 announcementChannel :: ChannelId
-announcementChannel = Id . T.pack $ lookupEnvReq "ANNOUCEMENT_CHANNEL"
+announcementChannel = Id . T.pack $ lookupEnvReq "ANNOUNCEMENT_CHANNEL"
 -- announcementChannel = Id "C02FJ64LD"  -- #hr-general
 
 uploadBucket :: T.Text
