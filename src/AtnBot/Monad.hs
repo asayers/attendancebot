@@ -23,6 +23,9 @@ module AtnBot.Monad
     , uploadFile
 
       -- * Slack
+    , nextEvent
+    , sendMsg
+    , sendRichMsg
     , sendIM
     , sendRichIM
     , getUsername
@@ -47,8 +50,7 @@ import qualified Data.Text as T
 import qualified Network.Google as G
 import qualified Network.Google.Storage as G
 import System.IO
-import qualified Web.Slack.Handle as H
-import Web.Slack.Monad
+import Web.Slack
 
 newtype AtnBot a = AtnBot (ReaderT AttnH (ResourceT IO) a)
     deriving ( Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch
@@ -59,15 +61,12 @@ instance MonadBaseControl IO AtnBot where
     liftBaseWith f = AtnBot $ liftBaseWith $ \run -> f (\(AtnBot x) -> run x)
     restoreM = AtnBot . restoreM
 
-instance MonadSlack AtnBot where
-    askSlackHandle = AtnBot $ slackH <$> ask
-
 instance G.MonadGoogle Scopes AtnBot where
     liftGoogle (G.Google x) =
         liftResourceT . runReaderT x . googleEnv =<< getAttnH
 
 data AttnH = AttnH
-    { slackH :: H.SlackHandle
+    { slackH :: SlackHandle
     , trackerH :: TrackerHandle
     , dbH :: DBHandle BotStateUpdate BotState
     , googleEnv :: G.Env Scopes
@@ -80,8 +79,8 @@ runAtnBot conf dbPath (AtnBot x) = do
     dbH <- newDBHandle updateBotState botStateUpdate_ initialState dbPath
     logger <- G.newLogger G.Debug stdout
     googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
-    H.withSlackHandle conf $ \slackH -> do
-        trackerH <- newTrackerHandle (H.getSession slackH) blacklist
+    withSlackHandle conf $ \slackH -> do
+        trackerH <- newTrackerHandle (getSession slackH) blacklist
         runResourceT $ runReaderT x AttnH{..}
 
 getAttnH :: AtnBot AttnH
@@ -122,32 +121,50 @@ uploadFile filepath name = do
 -------------------------------------------------------------------------------
 -- Slack helpers
 
+nextEvent :: AtnBot Event
+nextEvent = do
+    slack <- slackH <$> getAttnH
+    liftIO $ getNextEvent slack
+
+sendMsg :: ChannelId -> T.Text -> AtnBot ()
+sendMsg cid msg = do
+    slack <- slackH <$> getAttnH
+    liftIO $ sendMessage slack cid msg
+
+sendRichMsg :: ChannelId -> T.Text -> [Attachment] -> AtnBot ()
+sendRichMsg cid msg attnts = do
+    slack <- slackH <$> getAttnH
+    ret <- liftIO $ sendRichMessage slack cid msg attnts
+    either (liftIO . putStrLn . T.unpack) return ret
+
 sendIM :: UserId -> T.Text -> AtnBot ()
 sendIM uid msg = do
-    h <- trackerH <$> getAttnH
-    liftIO (UT.lookupIMChannel h uid) >>= \case
-        Just cid -> sendMessage cid msg
-        Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid
+    tracker <- trackerH <$> getAttnH
+    slack <- slackH <$> getAttnH
+    liftIO $ UT.lookupIMChannel tracker uid >>= \case
+        Just cid -> sendMessage slack cid msg
+        Nothing -> putStrLn $ "Couldn't find an IM channel for " ++ show uid
 
 sendRichIM :: UserId -> T.Text -> [Attachment] -> AtnBot ()
 sendRichIM uid msg attnts = do
-    h <- trackerH <$> getAttnH
-    liftIO (UT.lookupIMChannel h uid) >>= \case
+    tracker <- trackerH <$> getAttnH
+    slack <- slackH <$> getAttnH
+    liftIO $ UT.lookupIMChannel tracker uid >>= \case
         Just cid -> do
-            ret <- sendRichMessage cid msg attnts
-            either (liftIO . putStrLn . T.unpack) return ret
-        Nothing -> liftIO $ putStrLn $ "Couldn't find an IM channel for " ++ show uid
+            ret <- sendRichMessage slack cid msg attnts
+            either (putStrLn . T.unpack) return ret
+        Nothing -> putStrLn $ "Couldn't find an IM channel for " ++ show uid
 
 -- | The user must already exist when the connection to slack is
 -- established. TODO: get info from UserTracker
-getUsername :: MonadSlack m => UserId -> m T.Text
+getUsername :: UserId -> AtnBot T.Text
 getUsername uid =
     maybe "unknown" _userName .
         find (\user -> _userId user == uid) .
-            _slackUsers <$> getSession
+            _slackUsers . getSession . slackH <$> getAttnH
 
-getUsernames :: MonadSlack m => m (UserId -> T.Text)
+getUsernames :: AtnBot (UserId -> T.Text)
 getUsernames = do
-    SlackSession{..} <- getSession
+    SlackSession{..} <- getSession . slackH <$> getAttnH
     return $ \uid ->
         maybe "unknown" _userName $ find (\user -> _userId user == uid) _slackUsers

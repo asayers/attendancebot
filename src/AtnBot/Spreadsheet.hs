@@ -33,7 +33,7 @@ import Data.Thyme
 import qualified Network.Google as G
 import qualified Network.Google.Sheets as G
 import System.Locale
-import Web.Slack.Monad
+import Web.Slack
 
 getAttendanceData
     :: (G.MonadGoogle Scopes m, MonadBaseControl IO m)

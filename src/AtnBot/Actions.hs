@@ -34,7 +34,7 @@ checkin uid ts = do
 -- Reports
 
 sendDailySummary :: AtnBot ()
-sendDailySummary = sendMessage announcementChannel =<< dailySummary
+sendDailySummary = sendMsg announcementChannel =<< dailySummary
 
 remindMissing :: AtnBot ()
 remindMissing = mapM_ (uncurry sendIM) =<< missingReport
@@ -42,8 +42,7 @@ remindMissing = mapM_ (uncurry sendIM) =<< missingReport
 sendWeeklySummary :: AtnBot ()
 sendWeeklySummary = do
     attachment <- weeklySummary
-    ret <- sendRichMessage announcementChannel "" [attachment]
-    either (liftIO . putStrLn . T.unpack) return ret
+    sendRichMsg announcementChannel "" [attachment]
 
 -------------------------------------------------------------------------------
 -- Spreadsheet

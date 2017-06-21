@@ -36,7 +36,7 @@ main = do
         liftIO $ putStrLn "Fetching spreadsheet data..."
         updateFromSpreadsheet
         liftIO $ putStrLn "Listening to events..."
-        forever (getNextEvent >>= handleEvent)
+        forever (nextEvent >>= handleEvent)
 
 handleEvent :: Event -> AtnBot ()
 handleEvent ev = case ev of

@@ -39,7 +39,7 @@ packages:
 - '.'
 - location:
     git: https://github.com/mpickering/slack-api
-    commit: "e299b6c9eb198"
+    commit: "84db4aa"
   extra-dep: true
 - location:
     git: https://github.com/asayers/cron

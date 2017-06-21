@@ -33,15 +33,15 @@ missingReport :: AtnBot [(UserId, T.Text)]
 missingReport = do
     missing <- lateComers <$> getBotState <*> liftIO today
     forM missing $ \uid -> do
-        uname <- getUserName uid
+        uname <- getUsername uid
         liftIO $ T.putStrLn $ "Sending reminder to " <> uname
         return (uid, "You haven't checked in yet today. Please send me a message or add a reaction to something I've said to let me know you're here.")
 
 dailySummary :: AtnBot T.Text
 dailySummary = do
     bs <- getBotState
-    missing   <- fmap sort . mapM getUserName =<< lateComers    bs <$> liftIO today
-    onHoliday <- fmap sort . mapM getUserName =<< holidayMakers bs <$> liftIO today
+    missing   <- fmap sort . mapM getUsername =<< lateComers    bs <$> liftIO today
+    onHoliday <- fmap sort . mapM getUsername =<< holidayMakers bs <$> liftIO today
     streak <- goodRunLength bs <$> liftIO yesterday
     let missingTxt = case missing of
           [] -> "Everyone got in on time! Current streak: " <>
@@ -102,7 +102,7 @@ getColour = do
 summaryRow :: UserId -> AtnBot [Field]
 summaryRow uid = do
     bs <- getBotState
-    uname <- getUserName uid
+    uname <- getUsername uid
     badges <- map (badge . getTiming (userTimeSheet bs uid)) <$> liftIO getThisWeek
     td <- liftIO today
     let s = score (userTimeSheet bs uid) td
@@ -179,15 +179,6 @@ getMonday :: IO Day
 getMonday = do
     x <- view weekDate <$> today
     return $ review weekDate x{ wdDay = 1 }
-
--------------------------------------------------------------------------------
-
--- | The user must already exist when the connection to slack is established.
-getUserName :: MonadSlack m => UserId -> m T.Text
-getUserName uid =
-    maybe "unknown" _userName .
-    find (\user -> _userId user == uid) .
-    _slackUsers <$> getSession
 
 -------------------------------------------------------------------------------
 
