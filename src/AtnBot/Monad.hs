@@ -76,12 +76,25 @@ runAtnBot :: SlackConfig -> FilePath -> AtnBot a -> IO a
 runAtnBot conf dbPath (AtnBot x) = do
     let initialState = newBotState (defaultTimeSheet timezone deadline)
     putStrLn "Restoring state..."
-    dbH <- newDBHandle updateBotState botStateUpdate_ initialState dbPath
+    let updateBotState' = filtering (not . isBlacklisted) updateBotState
+    dbH <- newDBHandle updateBotState' botStateUpdate_ initialState dbPath
     logger <- G.newLogger G.Debug stdout
     googleEnv <- (G.envLogger .~ logger) <$> G.newEnv
     withSlackHandle conf $ \slackH -> do
         trackerH <- newTrackerHandle (getSession slackH) blacklist
         runResourceT $ runReaderT x AttnH{..}
+
+filtering :: (u -> Bool) -> (u -> a -> a) -> u -> a -> a
+filtering p f x = if p x then f x else id
+
+isBlacklisted :: BotStateUpdate -> Bool
+isBlacklisted = maybe False (`elem` blacklist) . bsuUid
+
+bsuUid :: BotStateUpdate -> Maybe UserId
+bsuUid bsu = case bsu of
+    CheckIn uid _ -> Just uid
+    MarkHoliday uid _ _ -> Just uid
+    SetTimeZone uid _ -> Just uid
 
 getAttnH :: AtnBot AttnH
 getAttnH = AtnBot ask
