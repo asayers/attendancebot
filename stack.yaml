@@ -15,7 +15,7 @@
 # resolver:
 #  name: custom-snapshot
 #  location: "./custom-snapshot.yaml"
-resolver: lts-6.28
+resolver: lts-8.5
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -49,10 +49,10 @@ packages:
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- gogol-0.1.0
-- gogol-core-0.1.0
-- gogol-sheets-0.1.0
-- gogol-storage-0.1.0
+- gogol-0.2.0
+- gogol-core-0.2.0
+- gogol-sheets-0.2.0
+- gogol-storage-0.2.0
 
 # Override default flag values for local packages and extra-deps
 flags: {}
