@@ -55,14 +55,14 @@ expectation cal day =
 calRegular :: Day -> Lens' Calendar Expectation
 calRegular day =
     case day ^. mondayWeek . _mwDay of
-        0 -> calMonday
-        1 -> calTuesday
-        2 -> calWednesday
-        3 -> calThursday
-        4 -> calFriday
-        5 -> calSaturday
-        6 -> calSunday
-        _ -> error "calRegular: DayOfWeek outside [0,6]"
+        1 -> calMonday
+        2 -> calTuesday
+        3 -> calWednesday
+        4 -> calThursday
+        5 -> calFriday
+        6 -> calSaturday
+        7 -> calSunday
+        _ -> error "calRegular: DayOfWeek outside [1,7]"
 
 reason :: Calendar -> Day -> Maybe Reason
 reason cal day = cal ^? calExceptions . ix day . _1
