@@ -81,4 +81,4 @@ dumpDebug uid sched = do
 -- Helpers
 
 timestampToUTCTime :: SlackTimeStamp -> UTCTime
-timestampToUTCTime = view (slackTime . getTime . thyme . from posixTime)
+timestampToUTCTime = view (slackTime . getTime . to fromSeconds . from posixTime)
